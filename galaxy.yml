@@ -5,7 +5,12 @@ version: 0.0.1
 readme: README.md
 authors:
   - Steve Fulmer <sfulmer@redhat.com>
-description: "EXPERIMENTAL - proof of concept, not production ready. Compliance profile wrapper for Windows Server DISA STIG, CIS Benchmarks, HIPAA, and PCI-DSS v4.0. Provides pipeline-oriented playbooks, Common Findings Format (CFF) output normalization, regulatory control crosswalk mapping, EE profiles, and Backstage/RHDH discovery metadata. Uses infra.windows_ops as the content engine."
+description: >-
+  EXPERIMENTAL - proof of concept, not production ready.
+  Compliance profile wrapper for Windows Server DISA STIG, CIS Benchmarks,
+  HIPAA, and PCI-DSS v4.0. Provides pipeline-oriented playbooks,
+  Common Findings Format (CFF) output normalization, and regulatory
+  control crosswalk mapping. Uses infra.windows_ops as content engine.
 license_file: LICENSE
 tags:
   - windows
