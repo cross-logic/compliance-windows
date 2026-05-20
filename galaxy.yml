@@ -1,11 +1,11 @@
 ---
 namespace: security
 name: compliance_windows
-version: 1.0.0
+version: 0.0.1
 readme: README.md
 authors:
   - Steve Fulmer <sfulmer@redhat.com>
-description: >-
+description: "EXPERIMENTAL - proof of concept, not production ready. >-"
   Compliance profile wrapper for Windows Server DISA STIG, CIS Benchmarks,
   HIPAA, and PCI-DSS v4.0. Provides pipeline-oriented playbooks, Common
   Findings Format (CFF) output normalization, regulatory control crosswalk
