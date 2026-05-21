@@ -10,6 +10,17 @@
   tags:
     - powerstig
 
+- name: Validate STIG version format
+  ansible.builtin.assert:
+    that:
+      - normalize_powerstig_stig_version is match("^[0-9]+\\.[0-9]+$")
+    fail_msg: >-
+      normalize_powerstig_stig_version must be a version number (e.g., "2.5").
+      Got: {{ normalize_powerstig_stig_version }}
+  tags:
+    - powerstig
+    - validation
+
 - name: Run PowerSTIG DSC compliance scan
   ansible.windows.win_powershell:
     script: |

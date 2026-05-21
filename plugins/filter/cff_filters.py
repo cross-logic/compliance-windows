@@ -196,7 +196,10 @@ def evaluate_rule(rule, gathered_facts):
 
         result["status"] = "pass" if passed else "fail"
         result["detail"] = "Expected %s %s %s, got %s" % (
-            path, operator, expected, actual
+            path,
+            operator,
+            expected,
+            actual,
         )
         result["actual_value"] = str(actual)
         result["expected_value"] = str(expected)
