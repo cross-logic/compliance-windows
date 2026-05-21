@@ -1,0 +1,21 @@
+---
+name: compliance-windows-stig
+description: Windows Server STIG compliance scanning and remediation
+version: "0.1.0"
+scanner: powerstig
+framework: DISA_STIG
+supported_os:
+  - windows_server_2019
+  - windows_server_2022
+  - windows_server_2025
+dependencies:
+  collections:
+    - security.compliance_windows
+  python:
+    - pywinrm>=0.4.0
+  system: []
+execution_environment:
+  base_image: registry.redhat.io/ansible-automation-platform/ee-supported-rhel9:latest
+  additional_build_steps:
+    prepend_galaxy:
+      - ansible-galaxy collection install security.compliance_windows

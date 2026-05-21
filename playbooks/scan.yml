@@ -1,0 +1,25 @@
+---
+# Standard entry point for ControllerClient: PowerSTIG scan.
+# Runs a PowerSTIG DSC compliance scan and produces CFF output.
+- name: Run PowerSTIG compliance scan
+  hosts: "{{ compliance_target_hosts | default('windows') }}"
+  gather_facts: true
+
+  tasks:
+    - name: Execute PowerSTIG scan
+      ansible.builtin.include_role:
+        name: security.compliance_windows.normalize_powerstig
+      vars:
+        normalize_powerstig_stig_version: "{{ compliance_stig_version | default('2.1') }}"
+        normalize_powerstig_scan_id: "{{ compliance_scan_id | default(ansible_date_time.iso8601_basic_short) }}"
+        normalize_powerstig_scan_type: scan
+        normalize_powerstig_framework: "{{ compliance_framework | default('DISA_STIG') }}"
+        normalize_powerstig_output_path: "{{ compliance_output_path | default('C:\\\\compliance_reports') }}"
+
+    - name: Push results to backend
+      ansible.builtin.include_tasks:
+        file: tasks/push_results.yml
+      vars:
+        push_results_cff_output: "{{ normalize_powerstig_cff_output }}"
+        push_results_cff_summary: "{{ normalize_powerstig_cff_summary }}"
+      when: compliance_results_backend | default('file') != 'file'

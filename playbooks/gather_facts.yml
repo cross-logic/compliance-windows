@@ -1,0 +1,17 @@
+---
+# Standard entry point for ControllerClient: gather compliance facts.
+# Collects registry, security policy, audit policy, and service data
+# from Windows hosts in a single WinRM round-trip.
+- name: Gather compliance facts from Windows hosts
+  hosts: "{{ compliance_target_hosts | default('windows') }}"
+  gather_facts: true
+
+  tasks:
+    - name: Collect compliance data via win_powershell
+      ansible.builtin.include_role:
+        name: security.compliance_windows.compliance_gather
+      vars:
+        compliance_gather_registry_paths: "{{ compliance_registry_paths | default([]) }}"
+        compliance_gather_security_policies: "{{ compliance_security_policies | default(true) }}"
+        compliance_gather_audit_policies: "{{ compliance_audit_policies | default(true) }}"
+        compliance_gather_services: "{{ compliance_services | default(true) }}"

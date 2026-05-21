@@ -5,6 +5,28 @@ All notable changes to this collection will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-05-21
+
+### Added
+
+- **Backstage Plugin Compatibility**
+  - CFF filter plugins now output both camelCase (Backstage) and snake_case (standalone) field names
+  - New fields: `stigId`, `fixText`, `checkText`, `disruption`, `parameters` on all CFF outputs
+  - Severity mapping: `high` → `CAT_I`, `medium` → `CAT_II`, `low` → `CAT_III`
+
+- **Standard Playbook Entry Points** (for ControllerClient)
+  - `playbooks/gather_facts.yml` — gather compliance data from Windows hosts
+  - `playbooks/evaluate.yml` — evaluate gathered facts against rule definitions
+  - `playbooks/remediate.yml` — apply STIG remediation via windows_ops or PowerSTIG DSC
+  - `playbooks/scan.yml` — run PowerSTIG compliance scan
+  - `playbooks/normalize.yml` — convert raw results to CFF
+
+- **EE Profile**
+  - `meta/ee_profile.yml` — execution environment build profile for STIG scanning
+
+- **Rules**
+  - `rules/stig_windows_server_2022.yml` — 10 real DISA STIG V2R1 rules with V-IDs for Windows Server 2022
+
 ## [1.0.0] - 2026-05-15
 
 ### Added

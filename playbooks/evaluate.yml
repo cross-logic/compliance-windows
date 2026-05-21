@@ -1,0 +1,32 @@
+---
+# Standard entry point for ControllerClient: evaluate compliance.
+# Runs gathered facts against YAML rule definitions and produces CFF output.
+- name: Evaluate compliance against rule definitions
+  hosts: "{{ compliance_target_hosts | default('windows') }}"
+  gather_facts: true
+
+  tasks:
+    - name: Gather compliance data
+      ansible.builtin.include_role:
+        name: security.compliance_windows.compliance_gather
+      vars:
+        compliance_gather_registry_paths: "{{ compliance_registry_paths | default([]) }}"
+        compliance_gather_security_policies: "{{ compliance_security_policies | default(true) }}"
+        compliance_gather_audit_policies: "{{ compliance_audit_policies | default(true) }}"
+        compliance_gather_services: "{{ compliance_services | default(true) }}"
+
+    - name: Evaluate gathered facts against rules
+      ansible.builtin.include_role:
+        name: security.compliance_windows.compliance_evaluate
+      vars:
+        compliance_evaluate_gathered_facts: "{{ compliance_gather_facts }}"
+        compliance_evaluate_rules_path: "{{ compliance_rules_path | default('') }}"
+        compliance_evaluate_framework: "{{ compliance_framework | default('DISA_STIG') }}"
+
+    - name: Push results to backend
+      ansible.builtin.include_tasks:
+        file: tasks/push_results.yml
+      vars:
+        push_results_cff_output: "{{ compliance_evaluate_cff_output }}"
+        push_results_cff_summary: {}
+      when: compliance_results_backend | default('file') != 'file'
