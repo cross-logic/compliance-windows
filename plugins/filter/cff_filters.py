@@ -120,3 +120,89 @@ class FilterModule:
             "checkType": "automated",
             "scanner": "powerstig",
         }
+
+
+def evaluate_rule(rule, gathered_facts):
+    """Evaluate a single compliance rule against gathered system facts.
+
+    Args:
+        rule: dict with keys: id, title, check_type, path, expected, operator
+        gathered_facts: dict from compliance_gather role
+
+    Returns:
+        dict in CFF finding format with status pass/fail/notchecked
+    """
+    rule_id = rule.get("id", "unknown")
+    title = rule.get("title", "")
+    check_type = rule.get("check_type", "registry")
+    path = rule.get("path", "")
+    property_name = rule.get("property", "")
+    expected = rule.get("expected")
+    operator = rule.get("operator", "eq")
+    severity = rule.get("severity", "medium")
+
+    result = {
+        "rule_id": rule_id,
+        "title": _safe_str(title),
+        "severity": severity,
+        "check_type": check_type,
+    }
+
+    try:
+        if check_type == "registry":
+            section = gathered_facts.get("registry", {})
+            reg_key = section.get(path, {})
+            actual = reg_key.get(property_name)
+        elif check_type == "secpol":
+            section = gathered_facts.get("secpol", {})
+            actual = section.get(path)
+        elif check_type == "auditpol":
+            section = gathered_facts.get("auditpol", {})
+            actual = section.get(path)
+        elif check_type == "service":
+            section = gathered_facts.get("services", {})
+            svc = section.get(path, {})
+            actual = svc.get(property_name, svc.get("Status"))
+        else:
+            result["status"] = "notchecked"
+            result["detail"] = "Unknown check_type: %s" % check_type
+            return result
+
+        if actual is None:
+            result["status"] = "notchecked"
+            result["detail"] = "Setting not found: %s" % path
+            return result
+
+        if operator == "eq":
+            passed = str(actual) == str(expected)
+        elif operator == "ne":
+            passed = str(actual) != str(expected)
+        elif operator == "ge":
+            passed = int(actual) >= int(expected)
+        elif operator == "le":
+            passed = int(actual) <= int(expected)
+        elif operator == "gt":
+            passed = int(actual) > int(expected)
+        elif operator == "lt":
+            passed = int(actual) < int(expected)
+        elif operator == "contains":
+            passed = str(expected) in str(actual)
+        elif operator == "not_contains":
+            passed = str(expected) not in str(actual)
+        else:
+            result["status"] = "notchecked"
+            result["detail"] = "Unknown operator: %s" % operator
+            return result
+
+        result["status"] = "pass" if passed else "fail"
+        result["detail"] = "Expected %s %s %s, got %s" % (
+            path, operator, expected, actual
+        )
+        result["actual_value"] = str(actual)
+        result["expected_value"] = str(expected)
+
+    except Exception as exc:
+        result["status"] = "notchecked"
+        result["detail"] = "Error evaluating rule: %s" % str(exc)
+
+    return result

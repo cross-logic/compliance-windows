@@ -18,15 +18,54 @@
       $osVersion = (Get-CimInstance Win32_OperatingSystem).Caption
       $stigVersion = "{{ normalize_powerstig_stig_version }}"
 
+      # Determine OS version for STIG selection
       if ($osVersion -match "2022") {
-          $results = Get-DscComplianceReport -OsVersion "2022" -StigVersion $stigVersion
+          $osTag = "WindowsServer-2022-MS"
       } elseif ($osVersion -match "2019") {
-          $results = Get-DscComplianceReport -OsVersion "2019" -StigVersion $stigVersion
+          $osTag = "WindowsServer-2019-MS"
       } elseif ($osVersion -match "2025") {
-          $results = Get-DscComplianceReport -OsVersion "2025" -StigVersion $stigVersion
+          $osTag = "WindowsServer-2025-MS"
+      } else {
+          throw "Unsupported OS: $osVersion"
       }
 
-      $results | ConvertTo-Json -Depth 10
+      # Generate DSC configuration from PowerSTIG
+      $null = & {
+          WindowsServer -OsVersion $osTag -StigVersion $stigVersion -OutputPath "$env:TEMP\StigDsc"
+      }
+
+      # Apply the DSC configuration in test mode
+      Start-DscConfiguration -Path "$env:TEMP\StigDsc" -Wait -Force
+
+      # Get compliance results via DSC
+      $testResult = Test-DscConfiguration -Detailed
+
+      # Build structured results from DSC resource states
+      $findings = @()
+      foreach ($resource in $testResult.ResourcesInDesiredState) {
+          $findings += @{
+              RuleId = $resource.ResourceId -replace '.*\[(.+?)\].*', '$1'
+              Status = "Compliant"
+              ResourceName = $resource.ResourceId
+              InDesiredState = $true
+          }
+      }
+      foreach ($resource in $testResult.ResourcesNotInDesiredState) {
+          $findings += @{
+              RuleId = $resource.ResourceId -replace '.*\[(.+?)\].*', '$1'
+              Status = "NonCompliant"
+              ResourceName = $resource.ResourceId
+              InDesiredState = $false
+          }
+      }
+
+      @{
+          InDesiredState = $testResult.InDesiredState
+          TotalResources = $findings.Count
+          CompliantCount = ($findings | Where-Object { $_.InDesiredState }).Count
+          NonCompliantCount = ($findings | Where-Object { -not $_.InDesiredState }).Count
+          Findings = $findings
+      } | ConvertTo-Json -Depth 10
   register: normalize_powerstig_raw_results
   tags:
     - powerstig
