@@ -2,11 +2,13 @@
 profile:
   id: stig_windows_2022
   name: DISA STIG for Windows Server 2022
-  version: V2R1
+  version: V2R7
   framework: DISA_STIG
+  rule_count: 10
   description: >
     Security Technical Implementation Guide for Windows Server 2022.
-    Rules based on DISA STIG V2R1 for Member Server configurations.
+    Rules based on DISA STIG V2R7 for Member Server configurations.
+    This file contains a representative subset; the full STIG has 283 rules.
 
 rules:
   - id: account_lockout_threshold
@@ -18,27 +20,26 @@ rules:
     severity: high
     category: Access Control
     disruption: low
-    check_type: secpol
+    check_text: >
+      Verify the Account lockout threshold is configured to 3 or fewer
+      invalid logon attempts but not 0 via Security Policy.
     fix_text: >
       Configure the policy value for Computer Configuration >>
       Windows Settings >> Security Settings >> Account Policies >>
       Account Lockout Policy >> Account lockout threshold to 3 or fewer
       invalid logon attempts.
-    check_text: >
-      Verify the Account lockout threshold is configured to 3 or fewer
-      invalid logon attempts but not 0 via Security Policy.
     check:
       type: secpol
       params:
         key: LockoutBadCount
         value: "3"
-    path: LockoutBadCount
-    expected: "3"
-    operator: le
+        operator: le
     parameters:
       - name: lockout_threshold
         default: "3"
         description: Maximum failed login attempts before lockout
+    aap_impact: safe
+    aap_impact_reason: ""
 
   - id: password_minimum_length
     stig_id: V-254240
@@ -49,25 +50,24 @@ rules:
     severity: high
     category: Access Control
     disruption: low
-    check_type: secpol
+    check_text: >
+      Verify the minimum password length is configured to 14 characters.
     fix_text: >
       Configure the policy value for Computer Configuration >>
       Windows Settings >> Security Settings >> Account Policies >>
       Password Policy >> Minimum password length to 14 characters.
-    check_text: >
-      Verify the minimum password length is configured to 14 characters.
     check:
       type: secpol
       params:
         key: MinimumPasswordLength
         value: "14"
-    path: MinimumPasswordLength
-    expected: "14"
-    operator: ge
+        operator: ge
     parameters:
       - name: min_password_length
         default: "14"
         description: Minimum number of characters required for passwords
+    aap_impact: safe
+    aap_impact_reason: ""
 
   - id: password_history
     stig_id: V-254241
@@ -78,26 +78,25 @@ rules:
     severity: medium
     category: Access Control
     disruption: low
-    check_type: secpol
+    check_text: >
+      Verify the Enforce password history is configured to 24 or more
+      passwords remembered.
     fix_text: >
       Configure the policy value for Computer Configuration >>
       Windows Settings >> Security Settings >> Account Policies >>
       Password Policy >> Enforce password history to 24 passwords remembered.
-    check_text: >
-      Verify the Enforce password history is configured to 24 or more
-      passwords remembered.
     check:
       type: secpol
       params:
         key: PasswordHistorySize
         value: "24"
-    path: PasswordHistorySize
-    expected: "24"
-    operator: ge
+        operator: ge
     parameters:
       - name: password_history_count
         default: "24"
         description: Number of unique passwords before reuse is allowed
+    aap_impact: safe
+    aap_impact_reason: ""
 
   - id: audit_logon_events
     stig_id: V-254255
@@ -108,22 +107,21 @@ rules:
     severity: medium
     category: Audit and Accountability
     disruption: low
-    check_type: auditpol
-    fix_text: >
-      Configure the audit policy for Logon/Logoff >> Logon to
-      include both Success and Failure.
     check_text: >
       Verify the Logon/Logoff >> Logon audit policy is set to include
       both Success and Failure.
+    fix_text: >
+      Configure the audit policy for Logon/Logoff >> Logon to
+      include both Success and Failure.
     check:
       type: auditpol
       params:
         key: "Logon/Logoff:Logon"
         value: "Success and Failure"
-    path: "Logon/Logoff:Logon"
-    expected: "Success and Failure"
-    operator: eq
+        operator: eq
     parameters: []
+    aap_impact: safe
+    aap_impact_reason: ""
 
   - id: windows_firewall_domain_state
     stig_id: V-254295
@@ -134,25 +132,25 @@ rules:
     severity: high
     category: System and Communications Protection
     disruption: medium
-    check_type: registry
+    check_text: >
+      Verify the Windows Firewall Domain profile is enabled.
     fix_text: >
       Configure the policy value for Computer Configuration >>
       Administrative Templates >> Network >> Network Connections >>
       Windows Defender Firewall >> Domain Profile >>
       Windows Defender Firewall: Protect all network connections to Enabled.
-    check_text: >
-      Verify the Windows Firewall Domain profile is enabled.
     check:
       type: registry
       params:
         path: "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\DomainProfile"
         property: EnableFirewall
         value: "1"
-    path: "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\DomainProfile"
-    property: EnableFirewall
-    expected: "1"
-    operator: eq
+        operator: eq
     parameters: []
+    aap_impact: breaks-connectivity
+    aap_impact_reason: >
+      Enabling the firewall may block WinRM (TCP 5985/5986) if inbound rules
+      are not configured. Verify WinRM firewall rules exist before remediation.
 
   - id: smb_signing_required
     stig_id: V-254256
@@ -163,25 +161,25 @@ rules:
     severity: medium
     category: System and Communications Protection
     disruption: medium
-    check_type: registry
+    check_text: >
+      Verify the RequireSecuritySignature registry value is set to 1.
     fix_text: >
       Configure the policy value for Computer Configuration >>
       Windows Settings >> Security Settings >> Local Policies >>
       Security Options >> Microsoft network server: Digitally sign
       communications (always) to Enabled.
-    check_text: >
-      Verify the RequireSecuritySignature registry value is set to 1.
     check:
       type: registry
       params:
         path: "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters"
         property: RequireSecuritySignature
         value: "1"
-    path: "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters"
-    property: RequireSecuritySignature
-    expected: "1"
-    operator: eq
+        operator: eq
     parameters: []
+    aap_impact: breaks-connectivity
+    aap_impact_reason: >
+      Enforcing SMB signing may break connectivity with legacy clients that
+      do not support SMB signing. Verify all SMB clients support signing first.
 
   - id: remote_desktop_encryption
     stig_id: V-254282
@@ -192,25 +190,23 @@ rules:
     severity: high
     category: System and Communications Protection
     disruption: low
-    check_type: registry
+    check_text: >
+      Verify the MinEncryptionLevel registry value is set to 3 (High).
     fix_text: >
       Configure the policy value for Computer Configuration >>
       Administrative Templates >> Windows Components >>
       Remote Desktop Services >> Remote Desktop Session Host >>
       Security >> Set client connection encryption level to High Level.
-    check_text: >
-      Verify the MinEncryptionLevel registry value is set to 3 (High).
     check:
       type: registry
       params:
         path: "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services"
         property: MinEncryptionLevel
         value: "3"
-    path: "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services"
-    property: MinEncryptionLevel
-    expected: "3"
-    operator: eq
+        operator: eq
     parameters: []
+    aap_impact: safe
+    aap_impact_reason: ""
 
   - id: guest_account_disabled
     stig_id: V-254244
@@ -220,22 +216,21 @@ rules:
     severity: medium
     category: Access Control
     disruption: low
-    check_type: secpol
+    check_text: >
+      Verify the Guest account is disabled via Security Policy.
     fix_text: >
       Configure the policy value for Computer Configuration >>
       Windows Settings >> Security Settings >> Local Policies >>
       Security Options >> Accounts: Guest account status to Disabled.
-    check_text: >
-      Verify the Guest account is disabled via Security Policy.
     check:
       type: secpol
       params:
         key: EnableGuestAccount
         value: "0"
-    path: EnableGuestAccount
-    expected: "0"
-    operator: eq
+        operator: eq
     parameters: []
+    aap_impact: safe
+    aap_impact_reason: ""
 
   - id: screen_saver_timeout
     stig_id: V-254303
@@ -246,27 +241,25 @@ rules:
     severity: medium
     category: Access Control
     disruption: low
-    check_type: registry
+    check_text: >
+      Verify the ScreenSaveTimeOut registry value is set to 900 or less.
     fix_text: >
       Configure the policy value for User Configuration >>
       Administrative Templates >> Control Panel >> Personalization >>
       Screen saver timeout to 900 seconds (15 minutes) or less.
-    check_text: >
-      Verify the ScreenSaveTimeOut registry value is set to 900 or less.
     check:
       type: registry
       params:
         path: "HKCU:\\Software\\Policies\\Microsoft\\Windows\\Control Panel\\Desktop"
         property: ScreenSaveTimeOut
         value: "900"
-    path: "HKCU:\\Software\\Policies\\Microsoft\\Windows\\Control Panel\\Desktop"
-    property: ScreenSaveTimeOut
-    expected: "900"
-    operator: le
+        operator: le
     parameters:
       - name: screensaver_timeout
         default: "900"
         description: Maximum idle time in seconds before screen saver activates
+    aap_impact: safe
+    aap_impact_reason: ""
 
   - id: password_maximum_age
     stig_id: V-254242
@@ -277,24 +270,23 @@ rules:
     severity: medium
     category: Access Control
     disruption: low
-    check_type: secpol
+    check_text: >
+      Verify the Maximum password age is configured to 60 days or less
+      but not 0.
     fix_text: >
       Configure the policy value for Computer Configuration >>
       Windows Settings >> Security Settings >> Account Policies >>
       Password Policy >> Maximum password age to 60 days or less
-      but not 0.
-    check_text: >
-      Verify the Maximum password age is configured to 60 days or less
       but not 0.
     check:
       type: secpol
       params:
         key: MaximumPasswordAge
         value: "60"
-    path: MaximumPasswordAge
-    expected: "60"
-    operator: le
+        operator: le
     parameters:
       - name: max_password_age
         default: "60"
         description: Maximum number of days before password must be changed
+    aap_impact: safe
+    aap_impact_reason: ""

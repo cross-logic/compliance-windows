@@ -1,0 +1,68 @@
+---
+# Execution Environment: Windows Server Compliance (STIG + CIS)
+#
+# Bundles WinRM connectivity, the compliance_windows wrapper collection,
+# and SCAP benchmark content for Windows Server STIG scanning via DISA SCC.
+#
+# DISA SCC itself is NOT embedded (legal: trade secret licensing).
+# The scan playbook downloads SCC at runtime from dl.dod.cyber.mil.
+# SCAP benchmarks ARE embedded (public domain, freely redistributable).
+#
+# Build:
+#   ansible-builder build -f execution-environment.yml -t compliance-windows-stig:latest -v3
+#
+# For CIS-only profiles, add infra.windows_ops to galaxy requirements.
+
+version: 3
+
+build_arg_defaults:
+  ANSIBLE_GALAXY_CLI_COLLECTION_OPTS: '--pre'
+
+options:
+  package_manager_path: /usr/bin/microdnf
+
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-26/ee-minimal-rhel9:latest
+
+dependencies:
+  galaxy:
+    collections:
+      - name: ansible.windows
+        version: ">=2.0.0"
+      - name: community.windows
+        version: ">=3.0.0"
+  python:
+    - pywinrm>=0.4.3
+    - requests-credssp>=2.0.0
+    - requests-ntlm>=1.2.0
+
+additional_build_steps:
+  prepend_galaxy:
+    - COPY _build/collections/ /usr/share/ansible/collections/
+
+  prepend_final:
+    # Install unzip for DISA SCC extraction at scan time
+    - RUN microdnf install -y unzip curl && microdnf clean all
+
+    # Pre-bake SCAP benchmarks (public domain, freely redistributable)
+    # Source: https://github.com/niwc-atlantic/scap-content-library
+    - RUN mkdir -p /usr/share/scap/windows
+    - COPY _build/scap-content/ /usr/share/scap/windows/
+
+  append_final:
+    # Verify collections
+    - RUN ansible-galaxy collection list security.compliance_windows
+    - RUN ansible-galaxy collection list ansible.windows
+
+    # Verify WinRM connectivity deps
+    - RUN python3 -c "import winrm; print('pywinrm', winrm.__version__)"
+    - RUN python3 -c "import requests_credssp; print('credssp OK')"
+    - RUN python3 -c "import requests_ntlm; print('ntlm OK')"
+
+    # Verify tools needed for SCC download at scan time
+    - RUN curl --version | head -1
+    - RUN unzip -v | head -1
+
+    # Verify SCAP content
+    - RUN test -d /usr/share/scap/windows/

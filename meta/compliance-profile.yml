@@ -1,0 +1,79 @@
+---
+# Compliance Profile Metadata
+#
+# This file declares the profile's identity, capabilities, and display
+# configuration. It is read by the Ansible Portal compliance plugin to:
+#   1. Auto-populate profile registration fields when a user selects a scan JT
+#   2. Render the dashboard dynamically (columns, labels, gauge text, tabs)
+#
+# These values are also set as JT default extra_vars during
+# profile installation (install.yml).
+
+profile:
+  slug: "windows-server-stig"
+  name: "DISA STIG Windows Server"
+  framework: "DISA_STIG"
+  version: "V2R7"
+  platform: "Windows Server 2019/2022/2025"
+  scanner: "scc"
+  remediation_playbook: "playbooks/remediate-windows-stig.yml"
+  remediate_jt_name: "compliance-remediate-stig-windows"
+  certification:
+    status: "certified"
+    authority: "SCAP 1.3"
+    disclaimer: >
+      DISA SCC (SCAP Compliance Checker) is NIST SCAP 1.3 validated.
+      Scan results are accepted for DISA STIG compliance assessments.
+      SCC is downloaded ephemerally from dl.dod.cyber.mil at scan time
+      due to NIWC trade secret licensing restrictions.
+  platform_spec:
+    os_family: ["Windows"]
+    os_version: ["2019", "2022", "2025"]
+
+  display:
+    gauge_label: "compliance rate"
+    gauge_unit: "rules"
+    remediation_verb: "Remediate"
+    severity_map:
+      CAT_I: "CAT I (High)"
+      CAT_II: "CAT II (Medium)"
+      CAT_III: "CAT III (Low)"
+    columns:
+      - field: stig_id
+        label: "STIG ID"
+      - field: title
+        label: "Title"
+      - field: severity
+        label: "Severity"
+      - field: status
+        label: "Status"
+      - field: fix_text
+        label: "Fix"
+    tabs:
+      - label: "STIG Findings"
+        icon: "security"
+        layout:
+          - widget: "score_grid"
+            title: "Compliance Overview"
+          - widget: "findings_table"
+            title: "STIG Controls"
+          - widget: "host_breakdown"
+            title: "Host Compliance Status"
+      - label: "HIPAA Crosswalk"
+        icon: "health_and_safety"
+        layout:
+          - widget: "crosswalk_summary"
+            title: "HIPAA Control Coverage"
+            crosswalk_profile: "hipaa"
+          - widget: "crosswalk_controls_table"
+            title: "HIPAA Control Mapping"
+            crosswalk_profile: "hipaa"
+      - label: "PCI-DSS Crosswalk"
+        icon: "payment"
+        layout:
+          - widget: "crosswalk_summary"
+            title: "PCI-DSS Control Coverage"
+            crosswalk_profile: "pci_dss_v4"
+          - widget: "crosswalk_controls_table"
+            title: "PCI-DSS Control Mapping"
+            crosswalk_profile: "pci_dss_v4"

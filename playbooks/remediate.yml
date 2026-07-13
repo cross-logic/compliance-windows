@@ -1,8 +1,19 @@
 ---
-# Standard entry point for ControllerClient: remediate findings.
-# Applies DISA STIG remediation via infra.windows_ops or PowerSTIG DSC.
+# Remediate Windows compliance findings.
+#
+# Supports two remediation engines:
+#   - windows_ops (default): uses infra.windows_ops roles
+#   - powerstig: uses PowerSTIG DSC configurations
+#
+# Variables:
+#   target_hosts: Host pattern (default: 'windows')
+#   compliance_remediation_engine: 'windows_ops' or 'powerstig'
+#   compliance_skip_rules: V-IDs to skip (default: [])
+#   compliance_only_rules: V-IDs to apply exclusively (default: [])
+#   compliance_stig_version: PowerSTIG STIG version (default: '2.1')
+
 - name: Remediate Windows compliance findings
-  hosts: "{{ compliance_target_hosts | default('windows') }}"
+  hosts: "{{ target_hosts | default('windows') }}"
   gather_facts: true
 
   tasks:
@@ -18,7 +29,10 @@
 
     - name: Run PowerSTIG DSC remediation
       ansible.windows.win_powershell:
+        parameters:
+          StigVersion: "{{ compliance_stig_version | default('2.1') }}"
         script: |
+          param([string]$StigVersion)
           Import-Module PowerSTIG
           $osVersion = (Get-CimInstance Win32_OperatingSystem).Caption
           if ($osVersion -match "2022") { $osTag = "WindowsServer-2022-MS" }
@@ -27,9 +41,7 @@
           else { throw "Unsupported OS: $osVersion" }
 
           $null = & {
-            WindowsServer -OsVersion $osTag `
-              -StigVersion "{{ compliance_stig_version | default('2.1') }}" `
-              -OutputPath "$env:TEMP\StigDsc"
+            WindowsServer -OsVersion $osTag -StigVersion $StigVersion -OutputPath "$env:TEMP\StigDsc"
           }
           Start-DscConfiguration -Path "$env:TEMP\StigDsc" -Wait -Force
       when: compliance_remediation_engine | default('windows_ops') == 'powerstig'

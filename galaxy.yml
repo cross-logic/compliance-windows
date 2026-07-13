@@ -11,7 +11,7 @@ description: >-
   HIPAA, and PCI-DSS v4.0. Provides pipeline-oriented playbooks,
   Common Findings Format (CFF) output normalization, and regulatory
   control crosswalk mapping. Uses infra.windows_ops as content engine.
-license_file: LICENSE
+license_file: COPYING
 tags:
   - windows
   - security

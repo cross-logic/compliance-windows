@@ -1,22 +1,55 @@
 ---
-- name: Push results to Backstage API
-  ansible.builtin.uri:
-    url: "{{ compliance_backstage_url }}/api/compliance/scans/{{ compliance_scan_id }}/findings"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ compliance_backstage_token }}"
-      Content-Type: application/json
-    body: "{{ push_results_cff_output | to_json }}"
-    body_format: json
-    status_code: [200, 201]
-  delegate_to: localhost
-  run_once: true
-  no_log: true
-  when: compliance_results_backend == 'api'
+# Stream NDJSON findings to the AAP Compliance Dashboard API (ADR-033/034).
+#
+# The normalizer composes .ndjson files on disk (preamble + one finding per line).
+# This task streams each file via uri+src — zero findings in Jinja2 variable space.
+#
+# Required vars:
+#   backstage_api_url: Dashboard backend URL
+#   push_results_ndjson_dir: Directory containing .ndjson files from normalizer
+#
+# Optional vars:
+#   scan_id: Scan identifier (required for API push)
+#   ingest_token: Per-scan security token (ADR-010)
 
-- name: Push results to Controller job artifacts
-  ansible.builtin.set_stats:
-    data:
-      compliance_findings: "{{ push_results_cff_output }}"
-      compliance_summary: "{{ push_results_cff_summary }}"
-  when: compliance_results_backend == 'artifacts'
+- name: Find per-host NDJSON files
+  ansible.builtin.find:
+    paths: "{{ push_results_ndjson_dir }}"
+    patterns: "*.ndjson"
+  register: _push_ndjson_files
+  delegate_to: localhost
+
+- name: Stream NDJSON findings to compliance API
+  ansible.builtin.uri:
+    url: "{{ backstage_api_url }}/api/compliance/findings/ingest"
+    method: POST
+    src: "{{ item.path }}"
+    headers:
+      Content-Type: application/x-ndjson
+      Authorization: "Bearer {{ ingest_token | default('') }}"
+    status_code: [201]
+    validate_certs: false
+    timeout: 120
+  loop: "{{ _push_ndjson_files.files | default([]) | sort(attribute='path') }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  delegate_to: localhost
+  register: _push_results
+  failed_when: false
+
+- name: Fail if no findings were ingested
+  ansible.builtin.fail:
+    msg: >-
+      All {{ _push_ndjson_files.files | length }} POST requests failed.
+      Check the POST task output above for HTTP status codes and errors.
+  when:
+    - _push_ndjson_files.files | default([]) | length > 0
+    - _push_results.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'equalto', 201) | list | length == 0
+
+- name: Report push results
+  ansible.builtin.debug:
+    msg: >-
+      POSTed findings for
+      {{ _push_results.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'equalto', 201) | list | length }}/{{ _push_ndjson_files.files | default([]) | length }}
+      hosts to {{ backstage_api_url }}.
+  when: _push_ndjson_files.files | default([]) | length > 0

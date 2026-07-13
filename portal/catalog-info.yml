@@ -6,7 +6,7 @@ metadata:
   title: Windows Server Compliance Profiles
   description: >-
     Compliance profile wrapper for Windows Server DISA STIG and CIS Benchmarks.
-    Provides pipeline playbooks, CFF normalization, and Backstage discovery.
+    Provides pipeline playbooks, CFF normalization, and Ansible Portal discovery.
   annotations:
     backstage.io/techdocs-ref: dir:.
   tags:

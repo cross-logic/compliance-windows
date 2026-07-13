@@ -21,13 +21,15 @@
     - powerstig
     - validation
 
-- name: Run PowerSTIG DSC compliance scan
+- name: Run PowerSTIG DSC compliance scan (audit-only)
   ansible.windows.win_powershell:
+    parameters:
+      StigVersion: "{{ normalize_powerstig_stig_version }}"
     script: |
+      param([string]$StigVersion)
       Import-Module PowerSTIG
 
       $osVersion = (Get-CimInstance Win32_OperatingSystem).Caption
-      $stigVersion = "{{ normalize_powerstig_stig_version }}"
 
       # Determine OS version for STIG selection
       if ($osVersion -match "2022") {
@@ -40,16 +42,13 @@
           throw "Unsupported OS: $osVersion"
       }
 
-      # Generate DSC configuration from PowerSTIG
+      # Generate DSC configuration from PowerSTIG (MOF files only — no changes applied)
       $null = & {
-          WindowsServer -OsVersion $osTag -StigVersion $stigVersion -OutputPath "$env:TEMP\StigDsc"
+          WindowsServer -OsVersion $osTag -StigVersion $StigVersion -OutputPath "$env:TEMP\StigDsc"
       }
 
-      # Apply the DSC configuration in test mode
-      Start-DscConfiguration -Path "$env:TEMP\StigDsc" -Wait -Force
-
-      # Get compliance results via DSC
-      $testResult = Test-DscConfiguration -Detailed
+      # Test compliance against the generated DSC config (audit-only, no modifications)
+      $testResult = Test-DscConfiguration -Path "$env:TEMP\StigDsc" -Detailed
 
       # Build structured results from DSC resource states
       $findings = @()
@@ -103,7 +102,7 @@
       scanner: powerstig
       findings: >-
         {{
-          normalize_powerstig_parsed | default([]) | map('security.compliance_windows.to_cff_powerstig') | list
+          normalize_powerstig_parsed.Findings | default([]) | map('security.compliance_windows.to_cff_powerstig') | list
         }}
   tags:
     - powerstig
