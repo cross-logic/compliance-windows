@@ -1,0 +1,159 @@
+name: Build Compliance EEs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/**'
+      - 'roles/**'
+      - 'playbooks/**'
+      - 'rules/**'
+      - 'ee/**'
+      - 'meta/**'
+      - 'galaxy.yml'
+      - '.github/workflows/build-ee.yml'
+  workflow_dispatch:
+    inputs:
+      profiles:
+        description: 'EE profiles to build (stig, cis, or all)'
+        required: false
+        default: 'all'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: stig
+            ee_file: ee/execution-environment.yml
+            image_suffix: windows-stig
+            scanner_type: scc
+          - profile: cis
+            ee_file: ee/execution-environment-cis.yml
+            image_suffix: windows-cis
+            scanner_type: ansible
+
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/compliance-${{ matrix.image_suffix }}
+
+    steps:
+      - name: Check if profile should build
+        id: check
+        run: |
+          INPUT="${{ github.event.inputs.profiles || 'all' }}"
+          if [[ "$INPUT" == "all" ]] || echo "$INPUT" | grep -q "${{ matrix.profile }}"; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'true'
+
+      - name: Set up Python
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ansible-builder
+        if: steps.check.outputs.skip != 'true'
+        run: pip install ansible-builder
+
+      - name: Log in to GHCR
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to registry.redhat.io
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: registry.redhat.io
+          username: ${{ secrets.REDHAT_REGISTRY_USER }}
+          password: ${{ secrets.REDHAT_REGISTRY_TOKEN }}
+
+      - name: Prepare build context
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          BUILD_DIR=$(mktemp -d)
+          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
+
+          # Copy EE definition
+          cp ${{ matrix.ee_file }} $BUILD_DIR/execution-environment.yml
+
+          # Create ansible-builder context
+          cd $BUILD_DIR
+          ansible-builder create -f execution-environment.yml -v 3
+
+          # Copy this collection into the build context
+          mkdir -p context/_build/collections/ansible_collections/security
+          cp -r $GITHUB_WORKSPACE \
+            context/_build/collections/ansible_collections/security/compliance_windows
+          # Clean build artifacts
+          rm -rf context/_build/collections/ansible_collections/security/compliance_windows/.git
+          rm -rf context/_build/collections/ansible_collections/security/compliance_windows/build
+
+          # For STIG EE: fetch SCAP benchmarks (public domain)
+          if [ "${{ matrix.scanner_type }}" = "scc" ]; then
+            echo "Fetching SCAP benchmarks from niwc-atlantic/scap-content-library..."
+            mkdir -p context/_build/scap-content
+            git clone --depth 1 https://github.com/niwc-atlantic/scap-content-library.git \
+              /tmp/scap-content-library || true
+            if [ -d /tmp/scap-content-library ]; then
+              cp -r /tmp/scap-content-library/ context/_build/scap-content/
+              rm -rf /tmp/scap-content-library
+            else
+              echo "WARNING: Could not fetch SCAP content"
+              mkdir -p context/_build/scap-content
+              touch context/_build/scap-content/.placeholder
+            fi
+          fi
+
+      - name: Build EE image
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          cd $BUILD_DIR
+          docker build -f context/Containerfile -t $IMAGE_NAME:latest context
+
+      - name: Tag with SHA
+        if: steps.check.outputs.skip != 'true'
+        run: docker tag $IMAGE_NAME:latest $IMAGE_NAME:${{ github.sha }}
+
+      - name: Push to GHCR
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          docker push $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:${{ github.sha }}
+
+      - name: Verify EE contents
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          echo "=== Verifying $IMAGE_NAME ==="
+          docker run --rm $IMAGE_NAME:latest \
+            ansible-galaxy collection list security.compliance_windows
+          docker run --rm $IMAGE_NAME:latest \
+            python3 -c "import winrm; print('pywinrm OK')"
+          docker run --rm $IMAGE_NAME:latest \
+            python3 -c "import requests_credssp; print('credssp OK')"
+
+          if [ "${{ matrix.scanner_type }}" = "scc" ]; then
+            docker run --rm $IMAGE_NAME:latest \
+              test -d /usr/share/scap/windows/
+            echo "SCAP content verified"
+          fi
+
+          if [ "${{ matrix.scanner_type }}" = "ansible" ]; then
+            docker run --rm $IMAGE_NAME:latest \
+              ansible-galaxy collection list infra.windows_ops
+          fi
+
+          echo "EE verified: $IMAGE_NAME"
