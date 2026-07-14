@@ -43,7 +43,7 @@
       platform: "Windows Server 2019/2022/2025"
       scanner: "scc"
       os_family: ["Windows"]
-      os_version: ["2019", "2022", "2025"]
+      os_version: ["10"]
       scan_jt_name: "compliance-scan-stig-windows"
       scan_playbook: "playbooks/run_scc.yml"
       remediate_jt_name: "compliance-remediate-stig-windows"

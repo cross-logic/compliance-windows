@@ -27,7 +27,7 @@ profile:
       due to NIWC trade secret licensing restrictions.
   platform_spec:
     os_family: ["Windows"]
-    os_version: ["2019", "2022", "2025"]
+    os_version: ["10"]
 
   display:
     gauge_label: "compliance rate"
