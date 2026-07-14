@@ -28,20 +28,31 @@
       when: compliance_remediation_engine | default('windows_ops') == 'windows_ops'
 
     - name: Run PowerSTIG DSC remediation
-      ansible.windows.win_powershell:
-        parameters:
-          StigVersion: "{{ compliance_stig_version | default('2.1') }}"
-        script: |
-          param([string]$StigVersion)
-          Import-Module PowerSTIG
-          $osVersion = (Get-CimInstance Win32_OperatingSystem).Caption
-          if ($osVersion -match "2022") { $osTag = "WindowsServer-2022-MS" }
-          elseif ($osVersion -match "2019") { $osTag = "WindowsServer-2019-MS" }
-          elseif ($osVersion -match "2025") { $osTag = "WindowsServer-2025-MS" }
-          else { throw "Unsupported OS: $osVersion" }
-
-          $null = & {
-            WindowsServer -OsVersion $osTag -StigVersion $StigVersion -OutputPath "$env:TEMP\StigDsc"
-          }
-          Start-DscConfiguration -Path "$env:TEMP\StigDsc" -Wait -Force
       when: compliance_remediation_engine | default('windows_ops') == 'powerstig'
+      block:
+        - name: Apply PowerSTIG DSC configuration
+          ansible.windows.win_powershell:
+            parameters:
+              StigVersion: "{{ compliance_stig_version | default('2.1') }}"
+            script: |
+              param([string]$StigVersion)
+              Import-Module PowerSTIG
+              $osVersion = (Get-CimInstance Win32_OperatingSystem).Caption
+              if ($osVersion -match "2022") { $osTag = "WindowsServer-2022-MS" }
+              elseif ($osVersion -match "2019") { $osTag = "WindowsServer-2019-MS" }
+              elseif ($osVersion -match "2025") { $osTag = "WindowsServer-2025-MS" }
+              else { throw "Unsupported OS: $osVersion" }
+
+              $null = & {
+                WindowsServer -OsVersion $osTag -StigVersion $StigVersion -OutputPath "$env:TEMP\StigDsc"
+              }
+              Start-DscConfiguration -Path "$env:TEMP\StigDsc" -Wait -Force
+          register: _powerstig_result
+
+      rescue:
+        - name: Report PowerSTIG remediation failure
+          ansible.builtin.debug:
+            msg: >-
+              PowerSTIG remediation failed on {{ inventory_hostname }}.
+              Error: {{ _powerstig_result.error | default(ansible_failed_result.msg | default('unknown')) }}.
+              The host may be in a partially remediated state. Review DSC logs on the target.

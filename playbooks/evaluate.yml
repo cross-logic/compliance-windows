@@ -5,7 +5,7 @@
   tasks:
     - name: Gather compliance facts
       ansible.builtin.include_role:
-        name: compliance_gather
+        name: security.compliance_windows.compliance_gather
       tags:
         - gather
 
@@ -37,12 +37,12 @@
     - name: Display evaluation summary
       ansible.builtin.debug:
         msg: >-
-          Host {{ item.host }}:
+          Host {{ item.host | default(item.item) }}:
           {{ item.summary.pass }} passed,
           {{ item.summary.fail }} failed,
           {{ item.summary.notchecked }} not checked
-      loop: "{{ evaluation_results.results | map(attribute='item') | list }}"
+      loop: "{{ evaluation_results.results }}"
       loop_control:
-        label: "{{ item }}"
+        label: "{{ item.host | default(item.item) }}"
       tags:
         - evaluate

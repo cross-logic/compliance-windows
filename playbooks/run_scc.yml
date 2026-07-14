@@ -121,7 +121,7 @@
   vars:
     # SCC was extracted to cache dir by Play 0
     scc_cache_dir: /tmp/compliance-scc
-    scc_version: "5.14"
+    scc_version: "{{ hostvars['localhost']['scc_version'] | default('5.14') }}"
     cscc_exe_dir: "{{ hostvars['localhost']['cscc_exe_dir'] }}"
 
     # SCAP benchmark content path in EE
@@ -137,109 +137,116 @@
     fetch_dest_dir: /tmp/compliance-results
 
   tasks:
-    # ── Copy SCC from EE to target ────────────────────────────────────
-    - name: Create SCC directory on target
-      ansible.windows.win_file:
-        path: "{{ target_scc_dir }}"
-        state: directory
+    - name: Run SCC scan with guaranteed cleanup
+      block:
+        # ── Copy SCC from EE to target ────────────────────────────────────
+        - name: Create SCC directory on target
+          ansible.windows.win_file:
+            path: "{{ target_scc_dir }}"
+            state: directory
 
-    - name: Copy SCC to target
-      ansible.windows.win_copy:
-        src: "{{ cscc_exe_dir }}/"
-        dest: "{{ target_scc_dir }}"
-      register: _scc_copy
+        - name: Copy SCC to target
+          ansible.windows.win_copy:
+            src: "{{ cscc_exe_dir }}/"
+            dest: "{{ target_scc_dir }}"
+          register: _scc_copy
 
-    # ── Copy SCAP benchmark from EE to target ─────────────────────────
-    - name: Create SCAP content directory on target
-      ansible.windows.win_file:
-        path: "{{ target_scap_dir }}"
-        state: directory
+        # ── Copy SCAP benchmark from EE to target ─────────────────────────
+        - name: Create SCAP content directory on target
+          ansible.windows.win_file:
+            path: "{{ target_scap_dir }}"
+            state: directory
 
-    - name: Copy SCAP benchmark content to target
-      ansible.windows.win_copy:
-        src: "{{ scap_benchmark_ee_path }}/"
-        dest: "{{ target_scap_dir }}"
-      register: _scap_copy
+        - name: Copy SCAP benchmark content to target
+          ansible.windows.win_copy:
+            src: "{{ scap_benchmark_ee_path }}/"
+            dest: "{{ target_scap_dir }}"
+          register: _scap_copy
 
-    # ── Run SCC unattended scan ────────────────────────────────────────
-    # SCC options (ADR-038 §2):
-    #   -u: unattended mode (no GUI)
-    #   --setOpt flat_results=true: flatten output directory (no nested folders)
-    #   Output directory: target_results_dir
-    #
-    # SCC automatically finds SCAP content in the same directory or via
-    # SCAP_CONTENT environment variable. We'll use --scap option to point
-    # to our copied benchmark directory.
-    - name: Create results directory on target
-      ansible.windows.win_file:
-        path: "{{ target_results_dir }}"
-        state: directory
+        # ── Run SCC unattended scan ────────────────────────────────────────
+        # SCC options (ADR-038 §2):
+        #   -u: unattended mode (no GUI)
+        #   --setOpt flat_results=true: flatten output directory (no nested folders)
+        #   Output directory: target_results_dir
+        #
+        # SCC automatically finds SCAP content in the same directory or via
+        # SCAP_CONTENT environment variable. We'll use --scap option to point
+        # to our copied benchmark directory.
+        - name: Create results directory on target
+          ansible.windows.win_file:
+            path: "{{ target_results_dir }}"
+            state: directory
 
-    - name: Run SCC unattended scan
-      ansible.windows.win_command:
-        cmd: >-
-          {{ target_scc_dir }}\cscc.exe
-          -u
-          --scap {{ target_scap_dir }}
-          --output {{ target_results_dir }}
-          --setOpt flat_results=true
-      register: _scan_result
-      # SCC exit codes: 0=all pass, 1=some fail (both valid), >1=error
-      failed_when: _scan_result.rc > 1
-      changed_when: false
+        - name: Run SCC unattended scan
+          ansible.windows.win_command:
+            cmd: >-
+              {{ target_scc_dir }}\cscc.exe
+              -u
+              --scap {{ target_scap_dir }}
+              --output {{ target_results_dir }}
+              --setOpt flat_results=true
+          register: _scan_result
+          # SCC exit codes: 0=all pass, 1=some fail (both valid), >1=error
+          failed_when: _scan_result.rc > 1
+          changed_when: false
 
-    # ── Fetch XCCDF results from target to EE ──────────────────────────
-    - name: Find XCCDF result XML files on target
-      ansible.windows.win_find:
-        paths: "{{ target_results_dir }}"
-        patterns: "*-xccdf.xml"
-      register: _result_files_target
+        # ── Fetch XCCDF results from target to EE ──────────────────────────
+        - name: Find XCCDF result XML files on target
+          ansible.windows.win_find:
+            paths: "{{ target_results_dir }}"
+            patterns: "*-xccdf.xml"
+          register: _result_files_target
 
-    - name: Fail if no XCCDF results found
-      ansible.builtin.fail:
-        msg: >-
-          No XCCDF result files found in {{ target_results_dir }}.
-          SCC scan may have failed. Check SCC output above.
-      when: _result_files_target.files | length == 0
+        - name: Fail if no XCCDF results found
+          ansible.builtin.fail:
+            msg: >-
+              No XCCDF result files found in {{ target_results_dir }}.
+              SCC scan may have failed. Check SCC output above.
+          when: _result_files_target.files | length == 0
 
-    - name: Create local results directory
-      ansible.builtin.file:
-        path: "{{ fetch_dest_dir }}"
-        state: directory
-        mode: '0755'
-      delegate_to: localhost
-      run_once: true
-      become: false
+        - name: Create local results directory
+          ansible.builtin.file:
+            path: "{{ fetch_dest_dir }}"
+            state: directory
+            mode: '0755'
+          delegate_to: localhost
+          run_once: true
+          become: false
 
-    - name: Fetch XCCDF results from target to EE
-      ansible.builtin.fetch:
-        src: "{{ (_result_files_target.files | first).path }}"
-        dest: "{{ fetch_dest_dir }}/xccdf-results-{{ inventory_hostname }}.xml"
-        flat: true
+        - name: Fetch all XCCDF results from target to EE
+          ansible.builtin.fetch:
+            src: "{{ item.path }}"
+            dest: "{{ fetch_dest_dir }}/xccdf-results-{{ inventory_hostname }}-{{ ansible_loop.index }}.xml"
+            flat: true
+          loop: "{{ _result_files_target.files }}"
+          loop_control:
+            label: "{{ item.path | win_basename | default(item.path | basename) }}"
+            extended: true
 
-    # ── Cleanup on target ──────────────────────────────────────────────
-    - name: Remove scan results from target
-      ansible.windows.win_file:
-        path: "{{ target_results_dir }}"
-        state: absent
+      always:
+        # ── Cleanup on target (runs even if scan fails) ────────────────────
+        - name: Remove scan results from target
+          ansible.windows.win_file:
+            path: "{{ target_results_dir }}"
+            state: absent
 
-    - name: Remove SCAP content from target
-      ansible.windows.win_file:
-        path: "{{ target_scap_dir }}"
-        state: absent
+        - name: Remove SCAP content from target
+          ansible.windows.win_file:
+            path: "{{ target_scap_dir }}"
+            state: absent
 
-    - name: Remove SCC from target
-      ansible.windows.win_file:
-        path: "{{ target_scc_dir }}"
-        state: absent
+        - name: Remove SCC from target
+          ansible.windows.win_file:
+            path: "{{ target_scc_dir }}"
+            state: absent
 
     - name: Report scan status
       ansible.builtin.debug:
         msg: >-
           SCC scan complete on {{ inventory_hostname }}.
-          Exit code: {{ _scan_result.rc }}
+          Exit code: {{ _scan_result.rc | default('N/A') }}
           (0=all pass, 1=some fail).
-          XCCDF results fetched to {{ fetch_dest_dir }}/xccdf-results-{{ inventory_hostname }}.xml.
+          XCCDF results fetched to {{ fetch_dest_dir }}.
 
 
 # ── Play 2: Normalize XCCDF results on execution node ─────────────────
@@ -330,8 +337,9 @@
           Content-Type: application/x-ndjson
           Authorization: "Bearer {{ ingest_token | default('') }}"
         status_code: [201]
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs | default(false) }}"
         timeout: 120
+      no_log: true
       loop: "{{ _post_body_files.files | default([]) | sort(attribute='path') }}"
       loop_control:
         label: "{{ item.path | basename }}"

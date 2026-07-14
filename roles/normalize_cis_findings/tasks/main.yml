@@ -34,11 +34,23 @@
   tags:
     - normalize
 
-- name: Write CFF JSON to output path
+- name: Write CFF JSON to output path (localhost/EE)
+  ansible.builtin.copy:
+    content: "{{ normalize_cis_findings_cff_output | to_nice_json }}"
+    dest: "{{ normalize_cis_findings_output_path }}/cff-cis-{{ normalize_cis_findings_scan_id }}.json"
+    mode: '0644'
+  check_mode: false
+  when: ansible_connection | default('local') in ['local', 'ssh']
+  tags:
+    - normalize
+    - reporting
+
+- name: Write CFF JSON to output path (Windows target)
   ansible.windows.win_copy:
     content: "{{ normalize_cis_findings_cff_output | to_nice_json }}"
     dest: "{{ normalize_cis_findings_output_path }}/cff-cis-{{ normalize_cis_findings_scan_id }}.json"
   check_mode: false
+  when: ansible_connection | default('local') not in ['local', 'ssh']
   tags:
     - normalize
     - reporting

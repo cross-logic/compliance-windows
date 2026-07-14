@@ -3,4 +3,4 @@ normalize_powerstig_output_path: /tmp/compliance/cff
 normalize_powerstig_scan_id: ""
 normalize_powerstig_scan_type: scan
 normalize_powerstig_framework: DISA_STIG
-normalize_powerstig_stig_version: ""
+normalize_powerstig_stig_version: "2.1"

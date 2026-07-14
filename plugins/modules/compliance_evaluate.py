@@ -135,13 +135,18 @@ SEVERITY_MAP = {
     "cat_iii": "CAT_III",
 }
 
+def _safe_int(v):
+    """Parse an integer, handling hex (0x...) and string representations."""
+    s = str(v).strip()
+    return int(s, 0) if s.startswith(('0x', '0X')) else int(s)
+
 OPERATORS = {
     "eq": lambda a, e: str(a) == str(e),
     "ne": lambda a, e: str(a) != str(e),
-    "ge": lambda a, e: int(a) >= int(e),
-    "le": lambda a, e: int(a) <= int(e),
-    "gt": lambda a, e: int(a) > int(e),
-    "lt": lambda a, e: int(a) < int(e),
+    "ge": lambda a, e: _safe_int(a) >= _safe_int(e),
+    "le": lambda a, e: _safe_int(a) <= _safe_int(e),
+    "gt": lambda a, e: _safe_int(a) > _safe_int(e),
+    "lt": lambda a, e: _safe_int(a) < _safe_int(e),
     "contains": lambda a, e: str(e) in str(a),
     "not_contains": lambda a, e: str(e) not in str(a),
 }
@@ -156,7 +161,7 @@ def _get_actual_value(facts, rule):
     check = rule.get("check", {})
     check_type = check.get("type", rule.get("check_type", "registry"))
     params = check.get("params", {})
-    path = params.get("key", rule.get("path", ""))
+    path = params.get("key", params.get("path", rule.get("path", "")))
     prop = params.get("property", rule.get("property", ""))
 
     if check_type == "registry":
@@ -171,7 +176,10 @@ def _get_actual_value(facts, rule):
         return facts.get("auditpol", {}).get(path)
 
     if check_type == "service":
-        svc = facts.get("services", {}).get(path, {})
+        services = facts.get("services", [])
+        svc = next((s for s in services if s.get("name") == path or s.get("Name") == path), None)
+        if svc is None:
+            return None
         return svc.get(prop, svc.get("Status"))
 
     return None

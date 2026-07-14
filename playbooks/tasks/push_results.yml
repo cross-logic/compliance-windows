@@ -4,17 +4,23 @@
 # The normalizer composes .ndjson files on disk (preamble + one finding per line).
 # This task streams each file via uri+src — zero findings in Jinja2 variable space.
 #
-# Required vars:
-#   backstage_api_url: Dashboard backend URL
+# Required vars (caller must provide):
+#   backstage_api_url: Dashboard backend URL (play var or inventory var)
 #   push_results_ndjson_dir: Directory containing .ndjson files from normalizer
+#     (defaults to /tmp/compliance-results)
 #
 # Optional vars:
 #   scan_id: Scan identifier (required for API push)
 #   ingest_token: Per-scan security token (ADR-010)
+#   aap_validate_certs: TLS verification (default: false)
+#
+# Legacy vars (accepted but unused by NDJSON path):
+#   push_results_cff_output: CFF JSON output (for role-based normalizers)
+#   push_results_cff_summary: CFF summary stats (for role-based normalizers)
 
 - name: Find per-host NDJSON files
   ansible.builtin.find:
-    paths: "{{ push_results_ndjson_dir }}"
+    paths: "{{ push_results_ndjson_dir | default('/tmp/compliance-results') }}"
     patterns: "*.ndjson"
   register: _push_ndjson_files
   delegate_to: localhost
@@ -28,8 +34,9 @@
       Content-Type: application/x-ndjson
       Authorization: "Bearer {{ ingest_token | default('') }}"
     status_code: [201]
-    validate_certs: false
+    validate_certs: "{{ aap_validate_certs | default(false) }}"
     timeout: 120
+  no_log: true
   loop: "{{ _push_ndjson_files.files | default([]) | sort(attribute='path') }}"
   loop_control:
     label: "{{ item.path | basename }}"

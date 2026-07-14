@@ -53,8 +53,9 @@
             body:
               framework: "{{ profile_framework }}"
               profileId: "{{ profile_id }}"
-            validate_certs: false
+            validate_certs: "{{ aap_validate_certs | default(false) }}"
             status_code: [200, 204, 404]
+          no_log: true
           register: _disconnect_result
 
         - name: Remove custom tab bundle (if any)
@@ -63,18 +64,20 @@
             method: DELETE
             headers:
               Authorization: "Bearer {{ backstage_token }}"
-            validate_certs: false
+            validate_certs: "{{ aap_validate_certs | default(false) }}"
             status_code: [200, 204, 404]
+          no_log: true
           when: profile_id | length > 0
 
     - name: Remove Controller job templates
       ansible.builtin.uri:
-        url: "{{ aap_host }}/api/controller/v2/job_templates/"
+        url: "{{ aap_host }}/api/controller/v2/job_templates/?name={{ controller_resources.scan_jt | urlencode }}"
         method: GET
         headers:
           Authorization: "Bearer {{ aap_token }}"
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs | default(false) }}"
         status_code: [200]
+      no_log: true
       register: _jt_list
 
     - name: Delete scan job template
@@ -83,11 +86,23 @@
         method: DELETE
         headers:
           Authorization: "Bearer {{ aap_token }}"
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs | default(false) }}"
         status_code: [200, 202, 204, 404]
+      no_log: true
       loop: "{{ _jt_list.json.results | selectattr('name', 'equalto', controller_resources.scan_jt) | list }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Look up remediation job template
+      ansible.builtin.uri:
+        url: "{{ aap_host }}/api/controller/v2/job_templates/?name={{ controller_resources.remediate_jt | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs | default(false) }}"
+        status_code: [200]
+      no_log: true
+      register: _remediate_jt_list
 
     - name: Delete remediation job template
       ansible.builtin.uri:
@@ -95,9 +110,10 @@
         method: DELETE
         headers:
           Authorization: "Bearer {{ aap_token }}"
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs | default(false) }}"
         status_code: [200, 202, 204, 404]
-      loop: "{{ _jt_list.json.results | selectattr('name', 'equalto', controller_resources.remediate_jt) | list }}"
+      no_log: true
+      loop: "{{ _remediate_jt_list.json.results | selectattr('name', 'equalto', controller_resources.remediate_jt) | list }}"
       loop_control:
         label: "{{ item.name }}"
 
