@@ -14,7 +14,7 @@
 # Prerequisites:
 #   - Execution Environment with DISA SCC + pywinrm
 #   - Target inventory with Windows Server 2019/2022/2025 hosts
-#   - WinRM credential with administrator access to targets
+#   - Machine credential with administrator access (SSH or WinRM)
 
 - name: "Install: DISA STIG Windows Server Profile"
   hosts: localhost

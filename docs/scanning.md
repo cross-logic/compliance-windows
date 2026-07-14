@@ -40,7 +40,7 @@ Set the scanner in playbook extra_vars or Controller JT variables:
 
 1. **Download SCC**: The scanner is downloaded ephemerally from `dl.dod.cyber.mil` at scan time due to NIWC trade secret licensing restrictions. The collection includes a download role that caches SCC in `/tmp/disa-scc/` on the execution node.
 
-2. **Transfer to targets**: SCC binaries are copied to each Windows target via WinRM.
+2. **Transfer to targets**: SCC binaries are copied to each Windows target (via SSH or WinRM).
 
 3. **Copy SCAP content**: XCCDF datastreams are copied from the execution environment to each target.
 

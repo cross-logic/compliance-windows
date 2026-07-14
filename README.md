@@ -78,7 +78,7 @@ The collection supports three scanner backends:
 - `infra.windows_ops` >= 2.0.1
 - `ansible.windows` >= 2.0.0
 - Python: `pywinrm`, `requests-credssp`, `requests-ntlm`
-- WinRM connectivity to target Windows hosts
+- SSH or WinRM connectivity to target Windows hosts
 - Administrator credentials with `become` privileges
 
 ## Quick Start

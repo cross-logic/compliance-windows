@@ -1,5 +1,5 @@
 ---
-# Compliance: Run DISA SCC STIG scan on Windows targets via WinRM
+# Compliance: Run DISA SCC STIG scan on Windows targets (SSH or WinRM)
 #
 # This playbook contains 3 plays in a single job template:
 #   Play 0 (localhost/EE): downloads DISA SCC tool (ephemeral) with cache fallback
