@@ -78,6 +78,43 @@
             layout:
               - { widget: "crosswalk_summary", title: "PCI-DSS Control Coverage", crosswalk_profile: "pci_dss_v4" }
               - { widget: "crosswalk_controls_table", title: "PCI-DSS Control Mapping", crosswalk_profile: "pci_dss_v4" }
+        crosswalks:
+          hipaa:
+            framework: "HIPAA"
+            version: "2013"
+            title: "HIPAA Security Rule — Technical Safeguards"
+            controls:
+              - { id: "164.312(a)(1)", title: "Access Control", stig_rules: ["V-254239", "V-254240", "V-254241", "V-254243"] }
+              - { id: "164.312(a)(2)(i)", title: "Unique User Identification", stig_rules: ["V-254239"] }
+              - { id: "164.312(a)(2)(ii)", title: "Emergency Access Procedure", stig_rules: [], gap: true, gap_note: "Organizational procedure — no direct technical control." }
+              - { id: "164.312(a)(2)(iii)", title: "Automatic Logoff", stig_rules: ["V-254369"] }
+              - { id: "164.312(a)(2)(iv)", title: "Encryption and Decryption", stig_rules: ["V-254247", "V-254248"] }
+              - { id: "164.312(b)", title: "Audit Controls", stig_rules: ["V-254318", "V-254319", "V-254320", "V-254321", "V-254322", "V-254323"] }
+              - { id: "164.312(c)(1)", title: "Integrity — Mechanism to Authenticate ePHI", stig_rules: ["V-254265", "V-254266"] }
+              - { id: "164.312(c)(2)", title: "Integrity — Electronic Verification", stig_rules: ["V-254265"] }
+              - { id: "164.312(d)", title: "Person or Entity Authentication", stig_rules: ["V-254239", "V-254240", "V-254241"] }
+              - { id: "164.312(e)(1)", title: "Transmission Security", stig_rules: ["V-254372", "V-254373"] }
+              - { id: "164.312(e)(2)(i)", title: "Transmission Security — Integrity Controls", stig_rules: ["V-254283", "V-254284"] }
+              - { id: "164.312(e)(2)(ii)", title: "Transmission Security — Encryption", stig_rules: ["V-254372", "V-254373", "V-254247"] }
+          pci_dss_v4:
+            framework: "PCI-DSS"
+            version: "4.0"
+            title: "PCI DSS v4.0 — Windows Server Technical Controls"
+            controls:
+              - { id: "2.2.1", title: "System Hardening Standards", stig_rules: ["V-254239", "V-254240", "V-254241", "V-254243"] }
+              - { id: "2.2.2", title: "Vendor Default Accounts", stig_rules: ["V-254243", "V-254244"] }
+              - { id: "2.2.4", title: "Unnecessary Services", stig_rules: ["V-254386"] }
+              - { id: "2.2.7", title: "Non-Console Administrative Access Encryption", stig_rules: ["V-254372", "V-254373", "V-254358"] }
+              - { id: "5.2.1", title: "Anti-Malware Deployed", stig_rules: ["V-254474"] }
+              - { id: "8.3.1", title: "User Authentication", stig_rules: ["V-254239", "V-254240"] }
+              - { id: "8.3.4", title: "Lockout After Invalid Attempts", stig_rules: ["V-254241"] }
+              - { id: "8.3.6", title: "Password Complexity", stig_rules: ["V-254240", "V-254244"] }
+              - { id: "8.3.9", title: "Password Reuse", stig_rules: ["V-254239"] }
+              - { id: "8.6.1", title: "Interactive Login for Service Accounts", stig_rules: ["V-254243"] }
+              - { id: "10.2.1", title: "Audit Logs Enabled", stig_rules: ["V-254318", "V-254319", "V-254320", "V-254321", "V-254322", "V-254323"] }
+              - { id: "10.3.1", title: "Audit Log Retention", stig_rules: ["V-254324"] }
+              - { id: "10.5.1", title: "Retain Audit Logs 12 Months", stig_rules: [], gap: true, gap_note: "Log retention is typically enforced by a central log management system, not local Windows policy." }
+              - { id: "11.5.2", title: "File Integrity Monitoring", stig_rules: [], gap: true, gap_note: "FIM requires a dedicated agent (AIDE, Tripwire, Wazuh). No native Windows GPO control." }
 
   tasks:
     - name: Validate required variables
