@@ -45,7 +45,7 @@
       os_family: ["Windows"]
       os_version: ["2019", "2022", "2025"]
       scan_jt_name: "compliance-scan-stig-windows"
-      scan_playbook: "playbooks/scan.yml"
+      scan_playbook: "playbooks/run_scc.yml"
       remediate_jt_name: "compliance-remediate-stig-windows"
       remediate_playbook: "playbooks/remediate-windows-stig.yml"
       display_config:
