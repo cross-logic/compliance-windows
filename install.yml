@@ -43,10 +43,11 @@
       platform: "Windows Server 2019/2022/2025"
       scanner: "scc"
       os_family: ["Windows"]
+      os_version: ["2019", "2022", "2025"]
       scan_jt_name: "compliance-scan-stig-windows"
-      scan_playbook: "collections/ansible_collections/security/compliance_windows/playbooks/scan.yml"
+      scan_playbook: "playbooks/scan.yml"
       remediate_jt_name: "compliance-remediate-stig-windows"
-      remediate_playbook: "collections/ansible_collections/security/compliance_windows/playbooks/remediate-windows-stig.yml"
+      remediate_playbook: "playbooks/remediate-windows-stig.yml"
       display_config:
         gauge_label: "compliance rate"
         gauge_unit: "rules"
@@ -62,11 +63,12 @@
           - { field: "status", label: "Status" }
           - { field: "fix_text", label: "Fix" }
         tabs:
-          - label: "STIG Findings"
+          - label: "Windows STIG"
             icon: "security"
             layout:
-              - { widget: "score_grid", title: "Compliance Overview" }
-              - { widget: "findings_table", title: "STIG Controls" }
+              - { widget: "summary_card", title: "Compliance Summary", metric: "compliance_rate" }
+              - { widget: "severity_breakdown", group_by: "severity" }
+              - { widget: "findings_table", title: "STIG Findings" }
               - { widget: "host_breakdown", title: "Host Compliance Status" }
           - label: "HIPAA Crosswalk"
             icon: "health_and_safety"
@@ -138,7 +140,7 @@
           project: "{{ project_name }}"
           playbook: "{{ profile.scan_playbook }}"
           inventory: "{{ inventory_name }}"
-          become_enabled: true
+          become_enabled: false
           ask_variables_on_launch: true
           ask_inventory_on_launch: true
           use_fact_cache: true
