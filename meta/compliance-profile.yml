@@ -16,7 +16,6 @@ profile:
   version: "V2R7"
   platform: "Windows Server 2019/2022/2025"
   scanner: "scc"
-  remediation_playbook: "playbooks/remediate-windows-stig.yml"
   remediate_jt_name: "compliance-remediate-stig-windows"
   certification:
     status: "certified"
