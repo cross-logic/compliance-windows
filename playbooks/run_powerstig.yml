@@ -121,14 +121,14 @@
                       }
                   }
 
-                  @{
+                  $Ansible.Result = @{
                       InDesiredState = $testResult.InDesiredState
                       TotalResources = $findings.Count
                       CompliantCount = ($findings | Where-Object { $_.InDesiredState }).Count
                       NonCompliantCount = ($findings | Where-Object { -not $_.InDesiredState }).Count
                       OsTag = $osTag
                       Findings = $findings
-                  } | ConvertTo-Json -Depth 10
+                  }
               } finally {
                   if (Test-Path $mofPath) { Remove-Item -Path $mofPath -Recurse -Force }
               }
@@ -138,7 +138,7 @@
 
         - name: Parse PowerSTIG results
           ansible.builtin.set_fact:
-            _powerstig_parsed: "{{ (_powerstig_raw.output | join('')) | from_json }}"
+            _powerstig_parsed: "{{ _powerstig_raw.result }}"
 
         - name: Transform findings to CFF
           ansible.builtin.set_fact:
