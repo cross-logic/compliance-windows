@@ -34,8 +34,8 @@ dependencies:
         version: ">=2.0.0"
       - name: community.windows
         version: ">=3.0.0"
-      - name: infra.windows_ops
-        version: ">=2.0.1"
+      # infra.windows_ops is injected via prepend_galaxy COPY step
+      # (not available on public Galaxy, requires Automation Hub auth)
   python:
     - pywinrm>=0.4.3
     - requests-credssp>=2.0.0
