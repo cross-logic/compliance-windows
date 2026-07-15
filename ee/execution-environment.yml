@@ -47,7 +47,8 @@ additional_build_steps:
 
   prepend_final:
     # Tools for SCC portable extraction at scan time
-    - RUN microdnf install -y unzip curl && microdnf clean all
+    # curl-minimal is already in the base image; only unzip is needed
+    - RUN microdnf install -y unzip && microdnf clean all
 
     # Pre-bake SCAP benchmarks (public domain, freely redistributable)
     # Source: https://github.com/niwc-atlantic/scap-content-library
@@ -67,7 +68,6 @@ additional_build_steps:
     - RUN python3 -c "import requests_ntlm; print('ntlm OK')"
 
     # Verify SCC download tools
-    - RUN curl --version | head -1
     - RUN unzip -v | head -1
 
     # Verify SCAP content
