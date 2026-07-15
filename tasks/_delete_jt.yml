@@ -1,0 +1,24 @@
+---
+- name: "Look up JT: {{ _jt_name }}"
+  ansible.builtin.uri:
+    url: "{{ aap_host }}/api/controller/v2/job_templates/?name={{ _jt_name | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ aap_token }}"
+    validate_certs: "{{ aap_validate_certs | default(false) }}"
+    status_code: [200]
+  no_log: true
+  register: _jt_lookup
+
+- name: "Delete JT: {{ _jt_name }}"
+  ansible.builtin.uri:
+    url: "{{ aap_host }}/api/controller/v2/job_templates/{{ item.id }}/"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ aap_token }}"
+    validate_certs: "{{ aap_validate_certs | default(false) }}"
+    status_code: [200, 202, 204, 404]
+  no_log: true
+  loop: "{{ _jt_lookup.json.results | selectattr('name', 'equalto', _jt_name) | list }}"
+  loop_control:
+    label: "{{ item.name }} (id={{ item.id }})"

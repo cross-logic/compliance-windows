@@ -2,7 +2,7 @@
 galaxy_info:
   author: Steve Fulmer
   description: Gather Windows compliance data in a single WinRM round-trip
-  license: Apache-2.0
+  license: GPL-3.0-or-later
   min_ansible_version: "2.16"
   platforms:
     - name: Windows

@@ -193,7 +193,7 @@ Install the profile via the playbook:
 export AAP_HOST=https://controller.example.com
 export AAP_API_TOKEN=<your-token>
 
-# Optional: set Backstage API URL for backend registration
+# Optional: set compliance dashboard API URL for backend registration
 export BACKSTAGE_API_URL=https://portal.example.com
 export BACKSTAGE_TOKEN=<backstage-token>
 
@@ -424,9 +424,9 @@ curl -k -X DELETE -H "Authorization: Bearer $AAP_API_TOKEN" \
   $AAP_HOST/api/v2/job_templates/$JT_ID/
 ```
 
-### Backstage backend connection refused
+### Compliance dashboard backend connection refused
 
-The backend registration task is optional and fails silently if Backstage is not available:
+The backend registration task is optional and fails silently if the compliance dashboard is not available:
 
 ```yaml
 failed_when: false

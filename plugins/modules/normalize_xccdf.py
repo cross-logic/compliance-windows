@@ -61,7 +61,7 @@ author:
 
 EXAMPLES = r'''
 - name: Normalize XCCDF results
-  security.compliance_rhel9_stig.normalize_xccdf:
+  security.compliance_windows.normalize_xccdf:
     results_files:
       - /tmp/scan-results/xccdf-results-webserver01.xml
     output_file: /tmp/compliance-report.json
@@ -92,7 +92,7 @@ findings:
 '''
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.security.compliance_rhel9_stig.plugins.module_utils.normalize_common import (
+from ansible_collections.security.compliance_windows.plugins.module_utils.normalize_common import (
     run_normalize,
     ARGUMENT_SPEC,
 )

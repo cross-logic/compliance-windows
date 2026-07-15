@@ -20,6 +20,6 @@ argument_specs:
         type: str
         default: DISA_STIG
       normalize_powerstig_stig_version:
-        description: PowerSTIG STIG version to scan against
+        description: PowerSTIG STIG version to scan against (e.g. "2.1", "2.5")
         type: str
-        default: ""
+        default: "2.1"

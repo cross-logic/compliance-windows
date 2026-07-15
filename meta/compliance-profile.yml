@@ -8,6 +8,9 @@
 #
 # These values are also set as JT default extra_vars during
 # profile installation (install.yml).
+#
+# Crosswalk definitions (HIPAA, PCI-DSS) are maintained in separate files
+# under compliance_profiles/ and loaded at install time by install.yml.
 
 profile:
   slug: "windows-server-stig"
@@ -15,16 +18,26 @@ profile:
   framework: "DISA_STIG"
   version: "V2R7"
   platform: "Windows Server 2019/2022/2025"
-  scanner: "scc"
+  scanner: "powerstig"
+  default_scanner: "powerstig"
+  scanners_available: ["powerstig", "scc"]
   remediate_jt_name: "compliance-remediate-stig-windows"
   certification:
-    status: "certified"
-    authority: "SCAP 1.3"
-    disclaimer: >
-      DISA SCC (SCAP Compliance Checker) is NIST SCAP 1.3 validated.
-      Scan results are accepted for DISA STIG compliance assessments.
-      SCC is downloaded ephemerally from dl.dod.cyber.mil at scan time
-      due to NIWC trade secret licensing restrictions.
+    powerstig:
+      status: "uncertified"
+      authority: ""
+      disclaimer: >
+        PowerSTIG uses DSC (Desired State Configuration) modules for compliance
+        checking. Results are not SCAP-validated but provide comprehensive STIG
+        coverage with scan and remediation symmetry.
+    scc:
+      status: "certified"
+      authority: "SCAP 1.3"
+      disclaimer: >
+        DISA SCC (SCAP Compliance Checker) is NIST SCAP 1.3 validated.
+        Scan results are accepted for DISA STIG compliance assessments.
+        SCC is downloaded ephemerally from dl.dod.cyber.mil at scan time
+        due to NIWC trade secret licensing restrictions.
   platform_spec:
     os_family: ["Windows"]
     os_version: ["10"]
@@ -79,40 +92,6 @@ profile:
           - widget: "crosswalk_controls_table"
             title: "PCI-DSS Control Mapping"
             crosswalk_profile: "pci_dss_v4"
-    crosswalks:
-      hipaa:
-        framework: "HIPAA"
-        version: "2013"
-        title: "HIPAA Security Rule — Technical Safeguards"
-        controls:
-          - { id: "164.312(a)(1)", title: "Access Control", description: "Implement technical policies and procedures for electronic information systems that maintain ePHI.", stig_rules: ["V-254239", "V-254240", "V-254241", "V-254243"] }
-          - { id: "164.312(a)(2)(i)", title: "Unique User Identification", description: "Assign a unique name and/or number for identifying and tracking user identity.", stig_rules: ["V-254239"] }
-          - { id: "164.312(a)(2)(ii)", title: "Emergency Access Procedure", description: "Establish procedures for obtaining necessary ePHI during an emergency.", stig_rules: [], gap: true, gap_note: "Organizational procedure — no direct technical control." }
-          - { id: "164.312(a)(2)(iii)", title: "Automatic Logoff", description: "Implement electronic procedures that terminate an electronic session after a predetermined time of inactivity.", stig_rules: ["V-254369"] }
-          - { id: "164.312(a)(2)(iv)", title: "Encryption and Decryption", description: "Implement a mechanism to encrypt and decrypt ePHI.", stig_rules: ["V-254247", "V-254248"] }
-          - { id: "164.312(b)", title: "Audit Controls", description: "Implement hardware, software, and/or procedural mechanisms that record and examine activity in information systems.", stig_rules: ["V-254318", "V-254319", "V-254320", "V-254321", "V-254322", "V-254323"] }
-          - { id: "164.312(c)(1)", title: "Integrity — Mechanism to Authenticate ePHI", description: "Implement policies and procedures to protect ePHI from improper alteration or destruction.", stig_rules: ["V-254265", "V-254266"] }
-          - { id: "164.312(c)(2)", title: "Integrity — Electronic Verification", description: "Implement electronic mechanisms to corroborate that ePHI has not been altered or destroyed.", stig_rules: ["V-254265"] }
-          - { id: "164.312(d)", title: "Person or Entity Authentication", description: "Implement procedures to verify that a person or entity seeking access to ePHI is the one claimed.", stig_rules: ["V-254239", "V-254240", "V-254241"] }
-          - { id: "164.312(e)(1)", title: "Transmission Security", description: "Implement technical security measures to guard against unauthorized access to ePHI being transmitted.", stig_rules: ["V-254372", "V-254373"] }
-          - { id: "164.312(e)(2)(i)", title: "Transmission Security — Integrity Controls", description: "Implement security measures to ensure electronically transmitted ePHI is not improperly modified.", stig_rules: ["V-254283", "V-254284"] }
-          - { id: "164.312(e)(2)(ii)", title: "Transmission Security — Encryption", description: "Implement a mechanism to encrypt ePHI whenever deemed appropriate.", stig_rules: ["V-254372", "V-254373", "V-254247"] }
-      pci_dss_v4:
-        framework: "PCI-DSS"
-        version: "4.0"
-        title: "PCI DSS v4.0 — Windows Server Technical Controls"
-        controls:
-          - { id: "2.2.1", title: "System Hardening Standards", description: "Configuration standards for all system components are developed, implemented, and maintained.", stig_rules: ["V-254239", "V-254240", "V-254241", "V-254243"] }
-          - { id: "2.2.2", title: "Vendor Default Accounts", description: "Vendor default accounts are managed and removed or disabled before a system is installed on the network.", stig_rules: ["V-254243", "V-254244"] }
-          - { id: "2.2.4", title: "Unnecessary Services", description: "Only necessary services, protocols, daemons, and functions are enabled.", stig_rules: ["V-254386"] }
-          - { id: "2.2.7", title: "Non-Console Administrative Access Encryption", description: "All non-console administrative access is encrypted using strong cryptography.", stig_rules: ["V-254372", "V-254373", "V-254358"] }
-          - { id: "5.2.1", title: "Anti-Malware Deployed", description: "An anti-malware solution is deployed on all system components.", stig_rules: ["V-254474"] }
-          - { id: "8.3.1", title: "User Authentication", description: "All user access to system components is authenticated with at least one authentication factor.", stig_rules: ["V-254239", "V-254240"] }
-          - { id: "8.3.4", title: "Lockout After Invalid Attempts", description: "Invalid authentication attempts are limited by locking out the user ID after not more than 10 attempts.", stig_rules: ["V-254241"] }
-          - { id: "8.3.6", title: "Password Complexity", description: "Passwords/passphrases meet minimum complexity requirements.", stig_rules: ["V-254240", "V-254244"] }
-          - { id: "8.3.9", title: "Password Reuse", description: "Passwords/passphrases cannot be the same as the last four passwords used.", stig_rules: ["V-254239"] }
-          - { id: "8.6.1", title: "Interactive Login for Service Accounts", description: "If accounts used by systems or services can be used for interactive login, they are managed.", stig_rules: ["V-254243"] }
-          - { id: "10.2.1", title: "Audit Logs Enabled", description: "Audit logs are enabled and active for all system components and cardholder data.", stig_rules: ["V-254318", "V-254319", "V-254320", "V-254321", "V-254322", "V-254323"] }
-          - { id: "10.3.1", title: "Audit Log Retention", description: "Read access to audit logs is limited to those with a job-related need.", stig_rules: ["V-254324"] }
-          - { id: "10.5.1", title: "Retain Audit Logs 12 Months", description: "Retain audit log history for at least 12 months, with at least three months immediately available.", stig_rules: [], gap: true, gap_note: "Log retention is typically enforced by a central log management system, not local Windows policy." }
-          - { id: "11.5.2", title: "File Integrity Monitoring", description: "A change-detection mechanism is deployed to alert personnel to unauthorized modification of critical system files.", stig_rules: [], gap: true, gap_note: "FIM requires a dedicated agent (AIDE, Tripwire, Wazuh). No native Windows GPO control." }
+    crosswalk_files:
+      hipaa: "compliance_profiles/hipaa.yml"
+      pci_dss_v4: "compliance_profiles/pci_dss_v4.yml"

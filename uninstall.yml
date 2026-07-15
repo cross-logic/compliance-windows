@@ -7,8 +7,10 @@
 # This playbook:
 #   1. Marks the profile as "disconnected" in the compliance backend
 #      (all historical findings/scans/snapshots are preserved for audit)
-#   2. Removes Controller resources (JTs)
+#   2. Removes Controller resources (all possible scan JTs + remediation JT)
 #
+# The uninstall removes all known JT names regardless of which scanner_mode
+# was used during installation. Missing JTs are silently ignored (404 tolerance).
 # The profile can be reconnected at any time by running install.yml again.
 
 - name: "Disconnect: DISA STIG Windows Server Compliance Profile"
@@ -24,9 +26,10 @@
     profile_id: "{{ compliance_profile_id | default('') }}"
     profile_framework: "DISA_STIG"
 
-    controller_resources:
-      scan_jt: "compliance-scan-stig-windows"
-      remediate_jt: "compliance-remediate-stig-windows"
+    jt_names_to_remove:
+      - "compliance-scan-stig-windows"
+      - "compliance-scan-stig-windows-scc"
+      - "compliance-remediate-stig-windows"
 
   tasks:
     - name: Validate required variables
@@ -36,9 +39,6 @@
           - aap_token | length > 0
         fail_msg: "Set AAP_HOST and AAP_API_TOKEN environment variables"
 
-    # NOTE: The /profiles/disconnect and /profiles/:id/bundle endpoints are
-    # forward-looking — the backend does not implement them yet. These tasks
-    # will silently skip until lifecycle management endpoints are built (L6).
     - name: Disconnect profile in compliance backend
       when: backstage_api_url | length > 0
       block:
@@ -69,59 +69,18 @@
           no_log: true
           when: profile_id | length > 0
 
-    - name: Remove Controller job templates
-      ansible.builtin.uri:
-        url: "{{ aap_host }}/api/controller/v2/job_templates/?name={{ controller_resources.scan_jt | urlencode }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ aap_token }}"
-        validate_certs: "{{ aap_validate_certs | default(false) }}"
-        status_code: [200]
-      no_log: true
-      register: _jt_list
-
-    - name: Delete scan job template
-      ansible.builtin.uri:
-        url: "{{ aap_host }}/api/controller/v2/job_templates/{{ item.id }}/"
-        method: DELETE
-        headers:
-          Authorization: "Bearer {{ aap_token }}"
-        validate_certs: "{{ aap_validate_certs | default(false) }}"
-        status_code: [200, 202, 204, 404]
-      no_log: true
-      loop: "{{ _jt_list.json.results | selectattr('name', 'equalto', controller_resources.scan_jt) | list }}"
+    - name: Look up and delete Controller job templates
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/tasks/_delete_jt.yml"
+      loop: "{{ jt_names_to_remove }}"
       loop_control:
-        label: "{{ item.name }}"
-
-    - name: Look up remediation job template
-      ansible.builtin.uri:
-        url: "{{ aap_host }}/api/controller/v2/job_templates/?name={{ controller_resources.remediate_jt | urlencode }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ aap_token }}"
-        validate_certs: "{{ aap_validate_certs | default(false) }}"
-        status_code: [200]
-      no_log: true
-      register: _remediate_jt_list
-
-    - name: Delete remediation job template
-      ansible.builtin.uri:
-        url: "{{ aap_host }}/api/controller/v2/job_templates/{{ item.id }}/"
-        method: DELETE
-        headers:
-          Authorization: "Bearer {{ aap_token }}"
-        validate_certs: "{{ aap_validate_certs | default(false) }}"
-        status_code: [200, 202, 204, 404]
-      no_log: true
-      loop: "{{ _remediate_jt_list.json.results | selectattr('name', 'equalto', controller_resources.remediate_jt) | list }}"
-      loop_control:
-        label: "{{ item.name }}"
+        loop_var: _jt_name
 
     - name: Report disconnection result
       ansible.builtin.debug:
         msg: |
           === DISA STIG Windows Server Profile Disconnected ===
           Backend: {{ 'disconnected' if (_disconnect_result.status | default(0)) in [200, 204] else 'skipped' }}
-          Controller: JTs removed ({{ controller_resources.scan_jt }}, {{ controller_resources.remediate_jt }})
+          Controller: attempted removal of {{ jt_names_to_remove | length }} JTs
           Historical data: PRESERVED (findings, scans, snapshots retained for audit)
           To reconnect: run install.yml again

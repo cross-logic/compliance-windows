@@ -3,18 +3,15 @@
 #
 # Usage:
 #   ansible-playbook install.yml -e aap_host=https://controller.example.com -e aap_token=<token>
+#   ansible-playbook install.yml -e aap_host=... -e aap_token=... -e scanner=scc
+#   ansible-playbook install.yml -e aap_host=... -e aap_token=... -e scanner=both
 #
-# This playbook creates the necessary Controller resources:
-#   - Assessment Job Template (scan with DISA SCC)
-#   - Remediation Job Template (apply Windows STIG controls)
+# Scanner modes (set via -e scanner=<mode>):
+#   powerstig (default) — DSC-based scanning, no external downloads, recommended
+#   scc                 — SCAP 1.3 certified, portable SCC at scan time
+#   both                — creates both scan JTs, shared remediation JT
 #
-# If a profile with framework=DISA_STIG + platform=Windows already exists in the
-# compliance backend, this playbook reconnects it (preserving all historical data).
-#
-# Prerequisites:
-#   - Execution Environment with DISA SCC + pywinrm
-#   - Target inventory with Windows Server 2019/2022/2025 hosts
-#   - Machine credential with administrator access (SSH or WinRM)
+# See docs/scanner-selection-guide.md for guidance on choosing a scanner.
 
 - name: "Install: DISA STIG Windows Server Profile"
   hosts: localhost
@@ -28,24 +25,19 @@
     backstage_token: "{{ lookup('env', 'BACKSTAGE_TOKEN') | default('', true) }}"
     org_name: "{{ organization | default('Default') }}"
     project_name: "{{ project | default('compliance-profile-windows') }}"
-    ee_name: "{{ execution_environment | default('compliance-windows-stig') }}"
+    ee_name: "{{ execution_environment | default('compliance-windows') }}"
     inventory_name: "{{ inventory | default('compliance-windows-inventory') }}"
 
-    profile:
+    scanner_mode: "{{ scanner | default('powerstig') }}"
+
+    profile_base:
       slug: "windows-server-stig"
       name: "DISA STIG Windows Server"
       framework: "DISA_STIG"
       version: "V2R7"
-      description: "DISA STIG compliance scanning for Windows Server 2019/2022/2025 using SCAP Compliance Checker."
-      certification_status: "certified"
-      certification_authority: "SCAP 1.3"
-      certification_disclaimer: "DISA SCC (SCAP Compliance Checker) is NIST SCAP 1.3 validated. Scan results are accepted for DISA STIG compliance assessments. SCC is downloaded ephemerally from dl.dod.cyber.mil at scan time due to NIWC trade secret licensing restrictions."
       platform: "Windows Server 2019/2022/2025"
-      scanner: "scc"
       os_family: ["Windows"]
       os_version: ["10"]
-      scan_jt_name: "compliance-scan-stig-windows"
-      scan_playbook: "playbooks/run_scc.yml"
       remediate_jt_name: "compliance-remediate-stig-windows"
       remediate_playbook: "playbooks/remediate-windows-stig.yml"
       display_config:
@@ -80,43 +72,34 @@
             layout:
               - { widget: "crosswalk_summary", title: "PCI-DSS Control Coverage", crosswalk_profile: "pci_dss_v4" }
               - { widget: "crosswalk_controls_table", title: "PCI-DSS Control Mapping", crosswalk_profile: "pci_dss_v4" }
-        crosswalks:
-          hipaa:
-            framework: "HIPAA"
-            version: "2013"
-            title: "HIPAA Security Rule — Technical Safeguards"
-            controls:
-              - { id: "164.312(a)(1)", title: "Access Control", stig_rules: ["V-254239", "V-254240", "V-254241", "V-254243"] }
-              - { id: "164.312(a)(2)(i)", title: "Unique User Identification", stig_rules: ["V-254239"] }
-              - { id: "164.312(a)(2)(ii)", title: "Emergency Access Procedure", stig_rules: [], gap: true, gap_note: "Organizational procedure — no direct technical control." }
-              - { id: "164.312(a)(2)(iii)", title: "Automatic Logoff", stig_rules: ["V-254369"] }
-              - { id: "164.312(a)(2)(iv)", title: "Encryption and Decryption", stig_rules: ["V-254247", "V-254248"] }
-              - { id: "164.312(b)", title: "Audit Controls", stig_rules: ["V-254318", "V-254319", "V-254320", "V-254321", "V-254322", "V-254323"] }
-              - { id: "164.312(c)(1)", title: "Integrity — Mechanism to Authenticate ePHI", stig_rules: ["V-254265", "V-254266"] }
-              - { id: "164.312(c)(2)", title: "Integrity — Electronic Verification", stig_rules: ["V-254265"] }
-              - { id: "164.312(d)", title: "Person or Entity Authentication", stig_rules: ["V-254239", "V-254240", "V-254241"] }
-              - { id: "164.312(e)(1)", title: "Transmission Security", stig_rules: ["V-254372", "V-254373"] }
-              - { id: "164.312(e)(2)(i)", title: "Transmission Security — Integrity Controls", stig_rules: ["V-254283", "V-254284"] }
-              - { id: "164.312(e)(2)(ii)", title: "Transmission Security — Encryption", stig_rules: ["V-254372", "V-254373", "V-254247"] }
-          pci_dss_v4:
-            framework: "PCI-DSS"
-            version: "4.0"
-            title: "PCI DSS v4.0 — Windows Server Technical Controls"
-            controls:
-              - { id: "2.2.1", title: "System Hardening Standards", stig_rules: ["V-254239", "V-254240", "V-254241", "V-254243"] }
-              - { id: "2.2.2", title: "Vendor Default Accounts", stig_rules: ["V-254243", "V-254244"] }
-              - { id: "2.2.4", title: "Unnecessary Services", stig_rules: ["V-254386"] }
-              - { id: "2.2.7", title: "Non-Console Administrative Access Encryption", stig_rules: ["V-254372", "V-254373", "V-254358"] }
-              - { id: "5.2.1", title: "Anti-Malware Deployed", stig_rules: ["V-254474"] }
-              - { id: "8.3.1", title: "User Authentication", stig_rules: ["V-254239", "V-254240"] }
-              - { id: "8.3.4", title: "Lockout After Invalid Attempts", stig_rules: ["V-254241"] }
-              - { id: "8.3.6", title: "Password Complexity", stig_rules: ["V-254240", "V-254244"] }
-              - { id: "8.3.9", title: "Password Reuse", stig_rules: ["V-254239"] }
-              - { id: "8.6.1", title: "Interactive Login for Service Accounts", stig_rules: ["V-254243"] }
-              - { id: "10.2.1", title: "Audit Logs Enabled", stig_rules: ["V-254318", "V-254319", "V-254320", "V-254321", "V-254322", "V-254323"] }
-              - { id: "10.3.1", title: "Audit Log Retention", stig_rules: ["V-254324"] }
-              - { id: "10.5.1", title: "Retain Audit Logs 12 Months", stig_rules: [], gap: true, gap_note: "Log retention is typically enforced by a central log management system, not local Windows policy." }
-              - { id: "11.5.2", title: "File Integrity Monitoring", stig_rules: [], gap: true, gap_note: "FIM requires a dedicated agent (AIDE, Tripwire, Wazuh). No native Windows GPO control." }
+
+    scanners:
+      powerstig:
+        scanner: "powerstig"
+        scan_jt_name: "compliance-scan-stig-windows"
+        scan_playbook: "playbooks/run_powerstig.yml"
+        description: >-
+          DISA STIG compliance scanning for Windows Server using PowerSTIG DSC.
+          No external downloads required. Recommended for daily operations.
+        certification_status: "uncertified"
+        certification_authority: ""
+        certification_disclaimer: >-
+          PowerSTIG uses DSC (Desired State Configuration) modules for compliance
+          checking. Results are not SCAP-validated but provide comprehensive STIG
+          coverage with scan and remediation symmetry.
+      scc:
+        scanner: "scc"
+        scan_jt_name: "compliance-scan-stig-windows-scc"
+        scan_playbook: "playbooks/run_scc.yml"
+        description: >-
+          DISA STIG compliance scanning for Windows Server using DISA SCC
+          (SCAP 1.3 Validated). SCC is downloaded at scan time from dl.dod.cyber.mil.
+        certification_status: "certified"
+        certification_authority: "SCAP 1.3"
+        certification_disclaimer: >-
+          DISA SCC (SCAP Compliance Checker) is NIST SCAP 1.3 validated. Scan results
+          are accepted for DISA STIG compliance assessments. SCC is downloaded
+          ephemerally from dl.dod.cyber.mil at scan time.
 
   tasks:
     - name: Validate required variables
@@ -124,9 +107,37 @@
         that:
           - aap_host | length > 0
           - aap_token | length > 0
-        fail_msg: "Set AAP_HOST and AAP_API_TOKEN environment variables or pass -e aap_host=... -e aap_token=..."
+          - scanner_mode in ['powerstig', 'scc', 'both']
+        fail_msg: >-
+          Set AAP_HOST and AAP_API_TOKEN environment variables.
+          scanner_mode must be 'powerstig' (default), 'scc', or 'both'.
 
-    - name: Create assessment job template
+    - name: Load crosswalk definitions
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/compliance_profiles/{{ item }}.yml"
+        name: "_crosswalk_{{ item }}"
+      loop:
+        - hipaa
+        - pci_dss_v4
+
+    - name: Build display config with crosswalks
+      ansible.builtin.set_fact:
+        _display_config: >-
+          {{ profile_base.display_config | combine({
+               'crosswalks': {
+                 'hipaa': _crosswalk_hipaa,
+                 'pci_dss_v4': _crosswalk_pci_dss_v4
+               }
+             })
+          }}
+
+    - name: Determine scanners to install
+      ansible.builtin.set_fact:
+        _active_scanners: >-
+          {{ ['powerstig', 'scc'] if scanner_mode == 'both'
+             else [scanner_mode] }}
+
+    - name: Create assessment job template(s)
       ansible.builtin.uri:
         url: "{{ aap_host }}/api/controller/v2/job_templates/"
         method: POST
@@ -135,20 +146,39 @@
           Content-Type: "application/json"
         body_format: json
         body:
-          name: "{{ profile.scan_jt_name }}"
+          name: "{{ scanners[item].scan_jt_name }}"
           organization: "{{ org_name }}"
           project: "{{ project_name }}"
-          playbook: "{{ profile.scan_playbook }}"
+          playbook: "{{ scanners[item].scan_playbook }}"
           inventory: "{{ inventory_name }}"
           become_enabled: false
           ask_variables_on_launch: true
           ask_inventory_on_launch: true
           use_fact_cache: true
-          extra_vars: "{{ {'profile_slug': profile.slug, 'profile_name': profile.name, 'framework': profile.framework, 'version': profile.version, 'description': profile.description, 'certification_status': profile.certification_status, 'certification_authority': profile.certification_authority, 'certification_disclaimer': profile.certification_disclaimer, 'remediate_jt_name': profile.remediate_jt_name, 'platform': profile.platform, 'scanner': profile.scanner, 'os_family': profile.os_family, 'os_version': profile.os_version, 'display_config': profile.display_config} | to_json }}"
+          extra_vars: >-
+            {{ {
+              'profile_slug': profile_base.slug,
+              'profile_name': profile_base.name,
+              'framework': profile_base.framework,
+              'version': profile_base.version,
+              'description': scanners[item].description,
+              'certification_status': scanners[item].certification_status,
+              'certification_authority': scanners[item].certification_authority,
+              'certification_disclaimer': scanners[item].certification_disclaimer,
+              'remediate_jt_name': profile_base.remediate_jt_name,
+              'platform': profile_base.platform,
+              'scanner': scanners[item].scanner,
+              'os_family': profile_base.os_family,
+              'os_version': profile_base.os_version,
+              'display_config': _display_config
+            } | to_json }}
         validate_certs: "{{ aap_validate_certs | default(false) }}"
         status_code: [200, 201]
       no_log: true
-      register: _scan_jt
+      loop: "{{ _active_scanners }}"
+      loop_control:
+        label: "{{ scanners[item].scan_jt_name }}"
+      register: _scan_jts
       failed_when: false
 
     - name: Create remediation job template
@@ -160,10 +190,10 @@
           Content-Type: "application/json"
         body_format: json
         body:
-          name: "{{ profile.remediate_jt_name }}"
+          name: "{{ profile_base.remediate_jt_name }}"
           organization: "{{ org_name }}"
           project: "{{ project_name }}"
-          playbook: "{{ profile.remediate_playbook }}"
+          playbook: "{{ profile_base.remediate_playbook }}"
           inventory: "{{ inventory_name }}"
           ask_variables_on_launch: true
           ask_inventory_on_launch: true
@@ -175,23 +205,6 @@
       register: _remediate_jt
       failed_when: false
 
-    - name: Warn if scan JT creation returned unexpected status
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Assessment JT creation returned HTTP {{ _scan_jt.status | default('unknown') }}.
-          Expected 200 or 201. The JT may already exist or the request may have failed.
-      when: (_scan_jt.status | default(0) | int) not in [200, 201]
-
-    - name: Warn if remediation JT creation returned unexpected status
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Remediation JT creation returned HTTP {{ _remediate_jt.status | default('unknown') }}.
-          Expected 200 or 201. The JT may already exist or the request may have failed.
-      when: (_remediate_jt.status | default(0) | int) not in [200, 201]
-
-    # NOTE: The /profiles/connect endpoint is forward-looking — the backend
-    # does not implement it yet. This task will silently skip (failed_when: false)
-    # until the lifecycle management endpoints are built (L6 build plan phase).
     - name: Reconnect profile in compliance backend (if available)
       when: backstage_api_url | length > 0
       ansible.builtin.uri:
@@ -202,9 +215,9 @@
           Content-Type: "application/json"
         body_format: json
         body:
-          framework: "{{ profile.framework }}"
-          version: "{{ profile.version }}"
-          displayName: "{{ profile.name }}"
+          framework: "{{ profile_base.framework }}"
+          version: "{{ profile_base.version }}"
+          displayName: "{{ profile_base.name }}"
         validate_certs: "{{ aap_validate_certs | default(false) }}"
         status_code: [200, 201]
       no_log: true
@@ -214,9 +227,11 @@
     - name: Report installation result
       ansible.builtin.debug:
         msg: |
-          === {{ profile.name }} Profile Installed ===
-          Assessment JT: {{ profile.scan_jt_name }} (id={{ _scan_jt.json.id | default('exists') }})
-          Remediation JT: {{ profile.remediate_jt_name }} (id={{ _remediate_jt.json.id | default('exists') }})
-          Framework: {{ profile.framework }}
-          Version: {{ profile.version }}
-          Backend: {{ 'reconnected' if (_backend_connect.status | default(0)) in [200, 201] else 'skipped (no BACKSTAGE_API_URL)' }}
+          === {{ profile_base.name }} Profile Installed ===
+          Scanner mode: {{ scanner_mode }}
+          {% for s in _active_scanners %}
+          Scan JT: {{ scanners[s].scan_jt_name }} ({{ scanners[s].scanner }})
+          {% endfor %}
+          Remediation JT: {{ profile_base.remediate_jt_name }}
+          Framework: {{ profile_base.framework }} {{ profile_base.version }}
+          Backend: {{ 'reconnected' if (_backend_connect.status | default(0)) in [200, 201] else 'skipped' }}

@@ -1,34 +1,45 @@
 ---
 # Compliance: Run DISA SCC STIG scan on Windows targets (SSH or WinRM)
 #
-# This playbook contains 3 plays in a single job template:
+# This playbook contains 3 plays in a single job template (ADR-003):
 #   Play 0 (localhost/EE): downloads DISA SCC tool (ephemeral) with cache fallback
 #   Play 1 (Windows targets): copies SCC + SCAP content from EE to target,
 #     runs unattended scan, fetches XCCDF results back to EE, cleans up
-#   Play 2 (localhost/EE): normalizes fetched XCCDF results to CFF JSON
+#   Play 2 (localhost/EE): normalizes fetched XCCDF results to CFF NDJSON,
+#     streams to compliance API
 #
 # Both localhost plays run in the same container as Play 1, so fetched files
 # are available to the normalize step without cross-container file sharing.
 #
+# SCC is deployed via portable extraction (not the EXE installer). The bundle
+# ZIP from dl.dod.cyber.mil contains both an installer and a portable ZIP —
+# we use the portable approach for agentless operation (no registry entries,
+# no uninstaller required, just delete the directory). See ADR-038 §2.
+#
 # SCC is downloaded ephemerally at scan time and cached in /tmp/compliance-scc
 # on the execution node. On first run, the EE needs internet access to download
-# SCC from dl.dod.cyber.mil. Subsequent runs use the cached copy (ADR-038 §2).
+# SCC from dl.dod.cyber.mil. Subsequent runs use the cached copy.
 #
-# SCAP benchmark content (DISA Windows Server STIG SCAP Benchmark) is copied
-# from the EE to the target at scan time and removed afterward. The target
-# Windows host does NOT need any pre-installed compliance software.
+# SCAP benchmark content is copied from the EE to the target at scan time
+# and removed afterward. The target Windows host does NOT need any
+# pre-installed compliance software. Zero persistent footprint (ADR-008).
+#
+# For the recommended PowerSTIG scanner (no external downloads required),
+# use run_powerstig.yml instead. See docs/scanner-selection-guide.md.
 #
 # Variables:
-#   scc_version: DISA SCC version to download (default: 5.14)
+#   scc_version: DISA SCC version to download (default: 5.10.2)
+#   scc_bundle_checksum: SHA256 checksum of the bundle ZIP (version-pinned)
 #   scc_cache_dir: EE cache directory for SCC (default: /tmp/compliance-scc)
 #   target_results_dir: temp directory on Windows targets for scan results
 #     (default: C:\Temp\compliance-scan)
 #   fetch_dest_dir: directory on execution node for fetched results
 #     (default: /tmp/compliance-results)
 #   scan_id: required UUID for this scan run (from backend)
-#   backstage_api_url: required URL for Backstage API endpoint
+#   backstage_api_url: required URL for compliance API endpoint
 #   ingest_token: required per-scan security token (ADR-010)
-#   target_hosts: inventory pattern to scan (default: all)
+#   compliance_target_hosts: inventory pattern to scan (default: all)
+#   aap_validate_certs: TLS verification (default: false)
 
 # ── Play 0: Download SCC on execution node (ephemeral with cache) ──────
 
@@ -38,8 +49,9 @@
   gather_facts: false
 
   vars:
-    scc_version: "5.14"
+    scc_version: "5.10.2"
     scc_download_url: "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/scc-{{ scc_version }}_Windows_bundle.zip"
+    scc_bundle_checksum: ""
     scc_cache_dir: /tmp/compliance-scc
     scc_zip_filename: "scc-{{ scc_version }}_Windows_bundle.zip"
     scc_zip_path: "{{ scc_cache_dir }}/{{ scc_zip_filename }}"
@@ -51,16 +63,24 @@
         state: directory
         mode: '0755'
 
-    # Block/rescue: try download, fall back to cached version on failure
     - name: Try downloading SCC from DISA Cyber Exchange
       block:
         - name: Download SCC Windows bundle
           ansible.builtin.get_url:
             url: "{{ scc_download_url }}"
             dest: "{{ scc_zip_path }}"
+            checksum: "{{ scc_bundle_checksum | default(omit, true) }}"
             mode: '0644'
-            timeout: 120
+            timeout: 300
           register: _scc_download
+
+        - name: Warn if checksum not pinned
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: scc_bundle_checksum is not set. Download integrity is not verified.
+              Set scc_bundle_checksum to "sha256:<hash>" for production use.
+              Checksums are published in SCC release notes at dl.dod.cyber.mil.
+          when: scc_bundle_checksum | default('') | length == 0
 
         - name: Report successful download
           ansible.builtin.debug:
@@ -77,7 +97,8 @@
             msg: >-
               Failed to download SCC {{ scc_version }} and no cached copy found.
               On first run, the execution node needs internet access to download from
-              {{ scc_download_url }}. Subsequent runs will use the cached copy.
+              {{ scc_download_url }}. For air-gapped environments, pre-stage the bundle
+              at {{ scc_zip_path }} on the execution node.
           when: not _scc_cached.stat.exists
 
         - name: Warn about using cached SCC
@@ -115,13 +136,13 @@
 # ── Play 1: Scan Windows targets via WinRM ─────────────────────────────
 
 - name: "Compliance: DISA SCC STIG scan"
-  hosts: "{{ target_hosts | default('all') }}"
+  hosts: "{{ compliance_target_hosts | default('all') }}"
   gather_facts: true
 
   vars:
     # SCC was extracted to cache dir by Play 0
     scc_cache_dir: /tmp/compliance-scc
-    scc_version: "{{ hostvars['localhost']['scc_version'] | default('5.14') }}"
+    scc_version: "{{ hostvars['localhost']['scc_version'] }}"
     cscc_exe_dir: "{{ hostvars['localhost']['cscc_exe_dir'] }}"
 
     # SCAP benchmark content path in EE
@@ -164,14 +185,13 @@
           register: _scap_copy
 
         # ── Run SCC unattended scan ────────────────────────────────────────
-        # SCC options (ADR-038 §2):
-        #   -u: unattended mode (no GUI)
-        #   --setOpt flat_results=true: flatten output directory (no nested folders)
-        #   Output directory: target_results_dir
-        #
-        # SCC automatically finds SCAP content in the same directory or via
-        # SCAP_CONTENT environment variable. We'll use --scap option to point
-        # to our copied benchmark directory.
+        # SCC CLI (cscc.exe) in portable deployment:
+        #   -u: unattended mode (no GUI, batch/scripted operation)
+        #   --scap <dir>: path to SCAP benchmark content
+        #   --output <dir>: output directory for XCCDF results
+        #   --setOpt flat_results=true: flatten output (no nested folders)
+        # Exit codes: 0=all pass, 1=some fail (both valid), >1=error
+        # Override via scc_cli_extra_args for version-specific flags.
         - name: Create results directory on target
           ansible.windows.win_file:
             path: "{{ target_results_dir }}"
@@ -298,7 +318,7 @@
         results_files:
           - "{{ item.path }}"
         output_file: "{{ fetch_dest_dir }}/findings-{{ _host_label }}.json"
-        profile_name: "DISA STIG Windows Server 2022"
+        profile_name: "DISA STIG Windows Server"
         framework: "DISA_STIG"
         certification_status: "certified"
         certification_authority: "SCAP 1.3"
@@ -316,7 +336,7 @@
         extended: true
       register: _normalized
 
-    # ── Stream NDJSON to Backstage plugin API (ADR-034) ──────────────
+    # ── Stream NDJSON to compliance API (ADR-034) ────────────────────
     # The normalizer composed .ndjson files (preamble + one finding per
     # line). uri+src streams each file — zero findings data in Ansible's
     # Jinja2 variable space (ADR-033).
@@ -328,7 +348,7 @@
       register: _post_body_files
       when: backstage_api_url | default('') | length > 0
 
-    - name: Stream NDJSON findings per-host to Backstage compliance API
+    - name: Stream NDJSON findings per-host to compliance API
       ansible.builtin.uri:
         url: "{{ backstage_api_url }}/api/compliance/findings/ingest"
         method: POST

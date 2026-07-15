@@ -6,7 +6,7 @@
 
 Windows Server compliance profiles for DISA STIG, CIS Benchmarks, HIPAA, and PCI-DSS v4.0.
 
-OpenSCAP-based STIG scanning with DISA SCC (certified), CIS scanning via infra.windows_ops (conformant), and centralized normalization to Common Findings Format (CFF) for Ansible Portal dashboard integration.
+DISA STIG scanning with PowerSTIG (default, DSC-based) or DISA SCC (SCAP 1.3 certified), CIS scanning via infra.windows_ops (conformant), and centralized normalization to Common Findings Format (CFF) for Ansible Portal dashboard integration.
 
 ## Table of Contents
 
@@ -62,15 +62,15 @@ The collection supports three scanner backends:
 
 | Scanner | Certification | Distribution | Use Case |
 |---------|---------------|--------------|----------|
-| **DISA SCC** | SCAP 1.3 Certified | Ephemeral download from dl.dod.cyber.mil | STIG compliance for DoD/FedRAMP |
-| **infra.windows_ops** | Conformant (not certified) | Embedded in collection | CIS L1/L2 hardening checks |
-| **PowerSTIG** | Uncertified | DSC native | Alternative STIG scanning via DSC |
+| **PowerSTIG** (default) | Uncertified | DSC native (built into Windows) | Daily STIG scanning, no external downloads |
+| **DISA SCC** | SCAP 1.3 Certified | Portable download from dl.dod.cyber.mil | STIG compliance audits for DoD/FedRAMP |
+| **infra.windows_ops** | Conformant (not certified) | Embedded in EE | CIS L1/L2 hardening checks |
 
-**DISA SCC** is the recommended scanner for STIG assessments requiring certified SCAP results. SCC is downloaded at scan time due to NIWC trade secret licensing restrictions. SCAP benchmark content (XML datastreams) is freely redistributable and included in the execution environment.
+**PowerSTIG** is the recommended default for daily operations. It uses Windows DSC (`Test-DscConfiguration`) for audit-only scanning with no external downloads. The same DSC engine handles remediation (`Start-DscConfiguration`), giving scan/remediation symmetry.
+
+**DISA SCC** is recommended when SCAP 1.3 certification is required for audit evidence. SCC is deployed as a portable binary (not installed) and cleaned up after each scan. See [docs/scanner-selection-guide.md](docs/scanner-selection-guide.md) for choosing between scanners.
 
 **infra.windows_ops** provides CIS scanning with Ansible-native task execution. Results are conformant with CIS benchmarks but not CIS-certified.
-
-**PowerSTIG** is an alternative scanner using DSC modules for STIG assessment. It is uncertified but useful for environments standardized on DSC-based configuration management.
 
 ## Requirements
 
@@ -83,15 +83,23 @@ The collection supports three scanner backends:
 
 ## Quick Start
 
-### Scan (STIG with SCC)
+### Scan (STIG with PowerSTIG — recommended)
 
 ```bash
-ansible-playbook security.compliance_windows.scan-windows-stig \
+ansible-playbook security.compliance_windows.run_powerstig \
   -i inventory.yml \
-  --check
+  -e scan_id=$(uuidgen)
 ```
 
-This runs a DISA SCC SCAP scan in audit-only mode (no changes).
+This runs a PowerSTIG DSC audit-only scan (no changes to targets).
+
+### Scan (STIG with SCC — certified)
+
+```bash
+ansible-playbook security.compliance_windows.run_scc \
+  -i inventory.yml \
+  -e scan_id=$(uuidgen)
+```
 
 ### Scan (CIS with infra.windows_ops)
 
@@ -121,7 +129,8 @@ ansible-playbook security.compliance_windows.verify-windows-stig \
 ```
 security.compliance_windows/
 ├── playbooks/
-│   ├── scan-windows-stig.yml        # DISA STIG scan with SCC
+│   ├── run_powerstig.yml            # DISA STIG scan with PowerSTIG (recommended)
+│   ├── run_scc.yml                  # DISA STIG scan with SCC (certified)
 │   ├── scan-windows-cis.yml         # CIS L1/L2 scan with infra.windows_ops
 │   ├── remediate-windows-stig.yml   # STIG remediation
 │   ├── remediate-windows-cis.yml    # CIS remediation
@@ -141,7 +150,9 @@ security.compliance_windows/
 │   │   ├── cff_filters.py           # CFF transformation filters
 │   │   └── crosswalk_filters.py     # Control mapping filters
 │   └── modules/
-│       └── (future normalization modules)
+│       ├── normalize_xccdf.py       # XCCDF XML → CFF (SCC output)
+│       ├── normalize_powerstig.py   # CFF JSON → NDJSON (PowerSTIG output)
+│       └── compliance_evaluate.py   # Rule evaluation engine
 ├── compliance_profiles/
 │   ├── hipaa.yml                    # HIPAA Security Rule crosswalk
 │   └── pci_dss_v4.yml               # PCI-DSS v4.0 crosswalk
@@ -168,7 +179,8 @@ security.compliance_windows/
 
 | Playbook | Runs On | Description |
 |----------|---------|-------------|
-| `scan-windows-stig.yml` | Windows targets | DISA STIG scan with SCC + normalize to CFF |
+| `run_powerstig.yml` | Windows targets | DISA STIG scan with PowerSTIG DSC (recommended) |
+| `run_scc.yml` | Windows targets | DISA STIG scan with SCC (certified) |
 | `scan-windows-cis.yml` | Windows targets | CIS L1/L2 scan with infra.windows_ops + normalize to CFF |
 | `remediate-windows-stig.yml` | Windows targets | Apply STIG controls via infra.windows_ops or PowerSTIG |
 | `remediate-windows-cis.yml` | Windows targets | Apply CIS controls via infra.windows_ops |
@@ -222,26 +234,21 @@ See [docs/crosswalks.md](docs/crosswalks.md) for detailed crosswalk design and i
 
 ## Execution Environment
 
-The collection requires an execution environment with WinRM connectivity and optional SCAP content:
+A single unified EE supports all scanner backends (PowerSTIG, SCC, and CIS):
 
-**For STIG scanning:**
-- SCAP benchmark content (XCCDF datastreams) — freely redistributable
-- DISA SCC downloaded at runtime (not embedded due to licensing)
 - Python: `pywinrm`, `requests-credssp`, `requests-ntlm`
+- Collections: `ansible.windows`, `community.windows`, `infra.windows_ops`
+- Tools: `unzip`, `curl` (for SCC portable download)
+- SCAP benchmarks pre-baked (for SCC scanner path)
 
-**For CIS scanning:**
-- `infra.windows_ops` collection embedded
-- No additional dependencies
-
-**For PowerSTIG scanning:**
-- PowerSTIG DSC modules (optional)
-- PowerShell 5.1+ on targets
+PowerSTIG is a Windows PowerShell module installed on the TARGET, not in the EE.
 
 ### Build the EE
 
 ```bash
-cd ee/
-ansible-builder build -f execution-environment.yml -t compliance-windows-stig:latest -v3
+./scripts/build-ee.sh
+# Or manually:
+ansible-builder build -f ee/execution-environment.yml -t compliance-windows:latest -v3
 ```
 
 See [docs/ee-build-guide.md](docs/ee-build-guide.md) for detailed EE build instructions.
@@ -253,18 +260,22 @@ Run `install.yml` to register the profile on AAP Controller:
 ```bash
 export AAP_HOST=https://controller.example.com
 export AAP_API_TOKEN=<token>
+
+# PowerSTIG only (default, recommended)
 ansible-playbook install.yml
+
+# SCC only (for SCAP 1.3 certification)
+ansible-playbook install.yml -e scanner=scc
+
+# Both scanners (daily PowerSTIG + audit SCC)
+ansible-playbook install.yml -e scanner=both
 ```
 
-This creates:
-- Assessment Job Template (scan with DISA SCC)
-- Remediation Job Template (apply controls)
-- Profile metadata in Controller extra_vars
-
-See [docs/install-guide.md](docs/install-guide.md) for full installation workflow.
+This creates scan and remediation Job Templates with profile metadata in extra_vars. See [docs/scanner-selection-guide.md](docs/scanner-selection-guide.md) for choosing a scanner mode and [docs/install-guide.md](docs/install-guide.md) for the full installation workflow.
 
 ## Documentation
 
+- [Scanner Selection Guide](docs/scanner-selection-guide.md) — Choose between PowerSTIG and SCC
 - [Scanning Guide](docs/scanning.md) — How scanning works per scanner backend
 - [EE Build Guide](docs/ee-build-guide.md) — Build execution environments
 - [Crosswalks Guide](docs/crosswalks.md) — Regulatory control mapping
@@ -274,7 +285,7 @@ See [docs/install-guide.md](docs/install-guide.md) for full installation workflo
 
 - Join the [Ansible Forum](https://forum.ansible.com) for questions and discussion.
 - Use the `security` and `compliance` tags when posting.
-- Report issues on [GitHub](https://github.com/cross-logic/aap-compliance-pipelines/issues).
+- Report issues on [GitHub](https://github.com/stevefulme1/compliance-windows/issues).
 
 ## License
 

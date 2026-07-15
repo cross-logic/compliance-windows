@@ -11,7 +11,7 @@ description: >-
   HIPAA, and PCI-DSS v4.0. Provides pipeline-oriented playbooks,
   Common Findings Format (CFF) output normalization, and regulatory
   control crosswalk mapping. Uses infra.windows_ops as content engine.
-license_file: COPYING
+license_file: LICENSE
 tags:
   - windows
   - security
@@ -28,9 +28,16 @@ issues: https://github.com/stevefulme1/compliance-windows/issues
 dependencies:
   infra.windows_ops: ">=2.0.1"
   ansible.windows: ">=2.0.0"
+  community.windows: ">=3.0.0"
 build_ignore:
   - .git
   - .github
   - .gitignore
   - tests
+  - ee
+  - docs
+  - scripts
+  - tasks
+  - install.yml
+  - uninstall.yml
   - "*.tar.gz"

@@ -15,13 +15,15 @@ This guide explains how compliance scanning works in the `security.compliance_wi
 
 ## Scanner Backends
 
-The collection supports three scanner backends, selected via the `compliance_scanner` variable:
+The collection supports three scanner backends, selected via the `scanner` variable:
 
 | Scanner | Value | Certification | Use Case |
 |---------|-------|---------------|----------|
-| DISA SCC | `scc` (default) | SCAP 1.3 Certified | DoD/FedRAMP STIG compliance |
+| PowerSTIG | `powerstig` (default) | Uncertified | Daily STIG scanning, no external downloads |
+| DISA SCC | `scc` | SCAP 1.3 Certified | DoD/FedRAMP STIG compliance audits |
 | infra.windows_ops | `ansible` | Conformant | CIS hardening checks |
-| PowerSTIG | `powerstig` | Uncertified | DSC-native STIG scanning |
+
+For detailed guidance on choosing between PowerSTIG and SCC, see the [Scanner Selection Guide](scanner-selection-guide.md).
 
 Set the scanner in playbook extra_vars or Controller JT variables:
 
@@ -29,7 +31,7 @@ Set the scanner in playbook extra_vars or Controller JT variables:
 - name: Scan with specific scanner
   hosts: windows
   vars:
-    compliance_scanner: scc  # or 'ansible' or 'powerstig'
+    scanner: scc  # or 'ansible' or 'powerstig'
 ```
 
 ## DISA SCC Scanner
@@ -165,7 +167,7 @@ SCAP benchmark content (XCCDF datastreams) is **freely redistributable** under D
 
 ### SCAP Content Location
 
-EE path: `/usr/share/xml/scap/disa/stig/`
+EE path: `/usr/share/scap/windows/`
 
 Content files:
 - `U_MS_Windows_Server_2019_STIG_V3R2_XCCDF.xml`

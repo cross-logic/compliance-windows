@@ -1,0 +1,264 @@
+---
+# Compliance: Run PowerSTIG DSC scan on Windows targets
+#
+# This playbook contains 2 plays in a single job template (ADR-003):
+#   Play 1 (Windows targets): runs PowerSTIG DSC audit via Test-DscConfiguration,
+#     transforms results to CFF JSON, fetches back to EE
+#   Play 2 (localhost/EE): converts CFF JSON to NDJSON, streams to compliance API
+#
+# Both plays run in the same container, so fetched files are available to the
+# normalize step without cross-container file sharing.
+#
+# PowerSTIG is a PowerShell module installed on the Windows TARGET, not in the EE.
+# Targets must have PowerSTIG pre-installed (Install-Module -Name PowerSTIG -Force).
+# DSC (Desired State Configuration) is built into Windows Server 2012 R2+.
+#
+# This is the recommended default scanner. For SCAP 1.3 certified scanning,
+# use run_scc.yml instead (see docs/scanner-selection-guide.md).
+#
+# Variables:
+#   compliance_target_hosts: inventory pattern to scan (default: all)
+#   scan_id: required UUID for this scan run (from backend)
+#   backstage_api_url: required URL for compliance API endpoint
+#   ingest_token: required per-scan security token (ADR-010)
+#   compliance_stig_version: PowerSTIG STIG version (default: "2.1")
+#   compliance_framework: compliance framework (default: DISA_STIG)
+#   remediate_jt_name: remediation JT name (auto-populated by profile)
+#   aap_validate_certs: TLS verification (default: false)
+
+# ── Play 1: PowerSTIG DSC scan on Windows targets ─────────────────────
+
+- name: "Compliance: PowerSTIG DISA STIG scan"
+  hosts: "{{ compliance_target_hosts | default('all') }}"
+  gather_facts: true
+
+  vars:
+    fetch_dest_dir: /tmp/compliance-results
+    _stig_version: "{{ compliance_stig_version | default('2.1') }}"
+    _scan_id: "{{ scan_id | default(ansible_date_time.iso8601_basic_short) }}"
+
+  tasks:
+    - name: Create fetch destination on execution node
+      ansible.builtin.file:
+        path: "{{ fetch_dest_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+    - name: Run PowerSTIG scan and normalize to CFF
+      block:
+        - name: Verify PowerSTIG module is installed
+          ansible.windows.win_powershell:
+            script: |
+              if (-not (Get-Module -ListAvailable -Name PowerSTIG)) {
+                throw "PowerSTIG module is not installed. Install with: Install-Module -Name PowerSTIG -Force -Scope AllUsers"
+              }
+              $mod = Get-Module -ListAvailable -Name PowerSTIG | Select-Object -First 1
+              $mod.Version.ToString()
+          register: _powerstig_check
+
+        - name: Report PowerSTIG version
+          ansible.builtin.debug:
+            msg: "PowerSTIG {{ _powerstig_check.output | trim }} on {{ inventory_hostname }}"
+
+        - name: Run PowerSTIG DSC compliance scan (audit-only)
+          ansible.windows.win_powershell:
+            parameters:
+              StigVersion: "{{ _stig_version }}"
+            script: |
+              param([string]$StigVersion)
+              Import-Module PowerSTIG
+
+              $osVersion = (Get-CimInstance Win32_OperatingSystem).Caption
+
+              if ($osVersion -match "2025") {
+                  $osTag = "WindowsServer-2025-MS"
+              } elseif ($osVersion -match "2022") {
+                  $osTag = "WindowsServer-2022-MS"
+              } elseif ($osVersion -match "2019") {
+                  $osTag = "WindowsServer-2019-MS"
+              } else {
+                  throw "Unsupported OS: $osVersion. PowerSTIG supports Windows Server 2019/2022/2025."
+              }
+
+              $mofPath = "$env:TEMP\StigDsc-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+              try {
+                  $null = & { WindowsServer -OsVersion $osTag -StigVersion $StigVersion -OutputPath $mofPath }
+                  $testResult = Test-DscConfiguration -Path $mofPath -Detailed
+
+                  $findings = @()
+                  foreach ($resource in $testResult.ResourcesInDesiredState) {
+                      $findings += @{
+                          RuleId = $resource.ResourceId -replace '.*\[(.+?)\].*', '$1'
+                          Status = "Compliant"
+                          ResourceName = $resource.ResourceId
+                          InDesiredState = $true
+                      }
+                  }
+                  foreach ($resource in $testResult.ResourcesNotInDesiredState) {
+                      $findings += @{
+                          RuleId = $resource.ResourceId -replace '.*\[(.+?)\].*', '$1'
+                          Status = "NonCompliant"
+                          ResourceName = $resource.ResourceId
+                          InDesiredState = $false
+                      }
+                  }
+
+                  @{
+                      InDesiredState = $testResult.InDesiredState
+                      TotalResources = $findings.Count
+                      CompliantCount = ($findings | Where-Object { $_.InDesiredState }).Count
+                      NonCompliantCount = ($findings | Where-Object { -not $_.InDesiredState }).Count
+                      OsTag = $osTag
+                      Findings = $findings
+                  } | ConvertTo-Json -Depth 10
+              } finally {
+                  if (Test-Path $mofPath) { Remove-Item -Path $mofPath -Recurse -Force }
+              }
+          register: _powerstig_raw
+          timeout: 600
+          changed_when: false
+
+        - name: Parse PowerSTIG results
+          ansible.builtin.set_fact:
+            _powerstig_parsed: "{{ _powerstig_raw.output | from_json }}"
+
+        - name: Transform findings to CFF
+          ansible.builtin.set_fact:
+            _cff_output:
+              schema_version: "1.0.0"
+              scan_id: "{{ _scan_id }}"
+              scan_type: scan
+              framework: "{{ compliance_framework | default('DISA_STIG') }}"
+              benchmark: "PowerSTIG DISA STIG"
+              benchmark_version: "{{ _powerstig_check.output | trim }}"
+              target_host: "{{ inventory_hostname }}"
+              target_os: "Windows Server {{ ansible_distribution_version | default('unknown') }}"
+              scan_timestamp: "{{ ansible_date_time.iso8601 }}"
+              scanner: powerstig
+              findings: >-
+                {{ _powerstig_parsed.Findings | default([])
+                   | map('security.compliance_windows.to_cff_powerstig') | list }}
+
+        - name: Write CFF JSON to temp file on target
+          ansible.windows.win_copy:
+            content: "{{ _cff_output | to_nice_json }}"
+            dest: "%TEMP%\\compliance-cff-{{ _scan_id }}.json"
+          check_mode: false
+
+        - name: Fetch CFF JSON back to execution node
+          ansible.builtin.fetch:
+            src: "%TEMP%\\compliance-cff-{{ _scan_id }}.json"
+            dest: "{{ fetch_dest_dir }}/cff-{{ inventory_hostname }}.json"
+            flat: true
+
+      always:
+        - name: Clean up temp files on target
+          ansible.windows.win_file:
+            path: "%TEMP%\\compliance-cff-{{ _scan_id }}.json"
+            state: absent
+          failed_when: false
+
+    - name: Report scan status
+      ansible.builtin.debug:
+        msg: >-
+          PowerSTIG scan complete on {{ inventory_hostname }}.
+          {{ _powerstig_parsed.CompliantCount | default(0) }}/{{ _powerstig_parsed.TotalResources | default(0) }} compliant.
+          CFF fetched to {{ fetch_dest_dir }}/cff-{{ inventory_hostname }}.json.
+
+
+# ── Play 2: Normalize CFF to NDJSON on execution node ─────────────────
+# Converts per-host CFF JSON to NDJSON for streaming to the compliance API.
+# Uses the normalize_powerstig module to keep findings out of Jinja2
+# variable space (ADR-033 OOM prevention).
+
+- name: "Compliance: Normalize PowerSTIG results"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    fetch_dest_dir: /tmp/compliance-results
+
+  tasks:
+    - name: Find all fetched CFF JSON files
+      ansible.builtin.find:
+        paths: "{{ fetch_dest_dir }}"
+        patterns: "cff-*.json"
+      register: _cff_files
+
+    - name: Fail if no results found
+      ansible.builtin.fail:
+        msg: >-
+          No CFF result files found in {{ fetch_dest_dir }}.
+          Ensure the PowerSTIG scan play completed successfully.
+      when: _cff_files.files | length == 0
+
+    - name: Locate rules metadata file
+      ansible.builtin.find:
+        paths: "{{ (role_path | default(playbook_dir)) + '/../rules' }}"
+        patterns: "*.yml"
+      register: _rules_files
+      failed_when: false
+
+    - name: Compose NDJSON from CFF results
+      security.compliance_windows.normalize_powerstig:
+        cff_files: "{{ _cff_files.files | map(attribute='path') | sort | list }}"
+        output_dir: "{{ fetch_dest_dir }}"
+        scan_id: "{{ scan_id | default('') }}"
+        ingest_token: "{{ ingest_token | default('') }}"
+        finalize_last: true
+        certification_status: uncertified
+        certification_authority: ""
+        rules_metadata_file: "{{ (_rules_files.files | default([]) | first | default({})).path | default('') }}"
+      register: _normalized
+      when: scan_id | default('') | length > 0
+
+    - name: Find per-host NDJSON files
+      ansible.builtin.find:
+        paths: "{{ fetch_dest_dir }}"
+        patterns: "*.ndjson"
+      register: _post_body_files
+      when: backstage_api_url | default('') | length > 0
+
+    - name: Stream NDJSON findings per-host to compliance API
+      ansible.builtin.uri:
+        url: "{{ backstage_api_url }}/api/compliance/findings/ingest"
+        method: POST
+        src: "{{ item.path }}"
+        headers:
+          Content-Type: application/x-ndjson
+          Authorization: "Bearer {{ ingest_token | default('') }}"
+        status_code: [201]
+        validate_certs: "{{ aap_validate_certs | default(false) }}"
+        timeout: 120
+      no_log: true
+      loop: "{{ _post_body_files.files | default([]) | sort(attribute='path') }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when:
+        - backstage_api_url | default('') | length > 0
+        - scan_id | default('') | length > 0
+      register: _post_results
+      failed_when: false
+
+    - name: Fail if no findings were ingested
+      ansible.builtin.fail:
+        msg: >-
+          All {{ _post_body_files.files | length }} POST requests failed.
+          Check the POST task output above for HTTP status codes.
+      when:
+        - backstage_api_url | default('') | length > 0
+        - _post_body_files.files | default([]) | length > 0
+        - _post_results.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'equalto', 201) | list | length == 0
+
+    - name: Report results
+      ansible.builtin.debug:
+        msg: >-
+          Normalized {{ _cff_files.files | length }} hosts
+          ({{ _normalized.total_findings | default(0) }} findings).
+          {% if backstage_api_url | default('') | length > 0 %}
+          POSTed {{ _post_results.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'equalto', 201) | list | length }}/{{ _post_body_files.files | default([]) | length }} to {{ backstage_api_url }}.
+          {% endif %}
+...

@@ -1,17 +1,19 @@
 ---
-# Execution Environment: Windows Server Compliance (STIG + CIS)
+# Execution Environment: Windows Server Compliance (unified)
 #
-# Bundles WinRM connectivity, the compliance_windows wrapper collection,
-# and SCAP benchmark content for Windows Server STIG scanning via DISA SCC.
+# Supports both scanner backends in a single EE:
+#   - PowerSTIG (recommended default): DSC-based scanning, no external downloads
+#   - DISA SCC (audit certification): portable SCC downloaded at scan time
 #
-# DISA SCC itself is NOT embedded (legal: trade secret licensing).
-# The scan playbook downloads SCC at runtime from dl.dod.cyber.mil.
-# SCAP benchmarks ARE embedded (public domain, freely redistributable).
+# Also supports CIS scanning via infra.windows_ops.
+#
+# PowerSTIG is a Windows PowerShell module installed on the TARGET, not here.
+# DISA SCC is NOT embedded (legal: trade secret licensing) — downloaded at
+# scan time from dl.dod.cyber.mil. SCAP benchmarks ARE embedded (public domain).
 #
 # Build:
-#   ansible-builder build -f execution-environment.yml -t compliance-windows-stig:latest -v3
-#
-# For CIS-only profiles, add infra.windows_ops to galaxy requirements.
+#   ansible-builder build -f execution-environment.yml \
+#     -t compliance-windows:latest -v3
 
 version: 3
 
@@ -32,6 +34,8 @@ dependencies:
         version: ">=2.0.0"
       - name: community.windows
         version: ">=3.0.0"
+      - name: infra.windows_ops
+        version: ">=2.0.1"
   python:
     - pywinrm>=0.4.3
     - requests-credssp>=2.0.0
@@ -42,7 +46,7 @@ additional_build_steps:
     - COPY _build/collections/ /usr/share/ansible/collections/
 
   prepend_final:
-    # Install unzip for DISA SCC extraction at scan time
+    # Tools for SCC portable extraction at scan time
     - RUN microdnf install -y unzip curl && microdnf clean all
 
     # Pre-bake SCAP benchmarks (public domain, freely redistributable)
@@ -51,16 +55,18 @@ additional_build_steps:
     - COPY _build/scap-content/ /usr/share/scap/windows/
 
   append_final:
-    # Verify collections
+    # Verify all collections
     - RUN ansible-galaxy collection list security.compliance_windows
     - RUN ansible-galaxy collection list ansible.windows
+    - RUN ansible-galaxy collection list community.windows
+    - RUN ansible-galaxy collection list infra.windows_ops
 
     # Verify WinRM connectivity deps
     - RUN python3 -c "import winrm; print('pywinrm', winrm.__version__)"
     - RUN python3 -c "import requests_credssp; print('credssp OK')"
     - RUN python3 -c "import requests_ntlm; print('ntlm OK')"
 
-    # Verify tools needed for SCC download at scan time
+    # Verify SCC download tools
     - RUN curl --version | head -1
     - RUN unzip -v | head -1
 
