@@ -138,7 +138,7 @@
 
         - name: Parse PowerSTIG results
           ansible.builtin.set_fact:
-            _powerstig_parsed: "{{ _powerstig_raw.output | from_json }}"
+            _powerstig_parsed: "{{ (_powerstig_raw.output | join('')) | from_json }}"
 
         - name: Transform findings to CFF
           ansible.builtin.set_fact:
