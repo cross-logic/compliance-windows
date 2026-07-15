@@ -56,12 +56,17 @@
           register: _powerstig_check
           changed_when: false
 
-        - name: Install PowerSTIG module (agentless — ADR-008 pattern)
+        - name: Install PowerSTIG module and dependencies (agentless — ADR-008 pattern)
           ansible.windows.win_powershell:
             script: |
               [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
               Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers | Out-Null
               Install-Module -Name PowerSTIG -Force -Scope AllUsers -AllowClobber
+              # Install required DSC resource modules (composite resources need these on the target)
+              (Get-Module PowerSTIG -ListAvailable).RequiredModules |
+                ForEach-Object { Install-Module -Name $_.Name -Force -Scope AllUsers -AllowClobber -ErrorAction SilentlyContinue }
+              # Increase WinRM envelope for large MOF files (PowerSTIG MOFs can be 400KB+)
+              Set-Item -Path WSMan:\localhost\MaxEnvelopeSizekb -Value 8192 -ErrorAction SilentlyContinue
               (Get-Module -ListAvailable -Name PowerSTIG | Select-Object -First 1).Version.ToString()
           register: _powerstig_install
           when: (_powerstig_check.output | default(['']) | first | trim) == "NOT_INSTALLED"
@@ -91,53 +96,79 @@
               ResultPath: "{{ (_win_temp.output | first | trim) }}\\compliance-dsc-result.json"
             script: |
               param([string]$StigVersion, [string]$ResultPath)
-              Import-Module PowerSTIG
 
-              $osVersion = (Get-CimInstance Win32_OperatingSystem).Caption
+              # Determine OS version (PowerSTIG expects '2019', '2022', '2025')
+              $osCaption = (Get-CimInstance Win32_OperatingSystem).Caption
+              if ($osCaption -match "2025") { $osVer = '2025' }
+              elseif ($osCaption -match "2022") { $osVer = '2022' }
+              elseif ($osCaption -match "2019") { $osVer = '2019' }
+              else { throw "Unsupported OS: $osCaption. PowerSTIG supports Windows Server 2019/2022/2025." }
 
-              if ($osVersion -match "2025") {
-                  $osTag = "WindowsServer-2025-MS"
-              } elseif ($osVersion -match "2022") {
-                  $osTag = "WindowsServer-2022-MS"
-              } elseif ($osVersion -match "2019") {
-                  $osTag = "WindowsServer-2019-MS"
+              # Determine domain membership for DomainName/ForestName params
+              $cs = Get-CimInstance Win32_ComputerSystem
+              if ($cs.PartOfDomain) {
+                  $domainName = $cs.Domain
+                  $forestName = ([System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest()).Name
               } else {
-                  throw "Unsupported OS: $osVersion. PowerSTIG supports Windows Server 2019/2022/2025."
+                  $domainName = 'standalone.local'
+                  $forestName = 'standalone.local'
               }
 
               $mofPath = "$env:TEMP\StigDsc-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
               try {
-                  $null = & { WindowsServer -OsVersion $osTag -StigVersion $StigVersion -OutputPath $mofPath }
+                  # WindowsServer is a DSC Composite Resource — must be declared inside
+                  # a Configuration{} block, NOT called as a function. Invoke-Expression
+                  # with a here-string injects variable values at definition time to avoid
+                  # $using: scope issues in win_powershell.
+                  $configScript = @"
+              configuration ComplianceAudit {
+                  param([string]`$NodeName = 'localhost')
+                  Import-DscResource -ModuleName PowerStig
+                  Node `$NodeName {
+                      WindowsServer BaseLine {
+                          OsVersion   = '$osVer'
+                          OsRole      = 'MS'
+                          StigVersion = '$StigVersion'
+                          DomainName  = '$domainName'
+                          ForestName  = '$forestName'
+                      }
+                  }
+              }
+              "@
+                  Invoke-Expression $configScript
+                  ComplianceAudit -OutputPath $mofPath | Out-Null
+
                   $testResult = Test-DscConfiguration -Path $mofPath -Detailed
 
                   $findings = @()
                   foreach ($resource in $testResult.ResourcesInDesiredState) {
                       $findings += @{
-                          RuleId = $resource.ResourceId -replace '.*\[(.+?)\].*', '$1'
-                          Status = "Compliant"
-                          ResourceName = $resource.ResourceId
+                          RuleId         = $resource.ResourceId -replace '.*\[(.+?)\].*', '$1'
+                          Status         = "Compliant"
+                          ResourceName   = $resource.ResourceId
                           InDesiredState = $true
                       }
                   }
                   foreach ($resource in $testResult.ResourcesNotInDesiredState) {
                       $findings += @{
-                          RuleId = $resource.ResourceId -replace '.*\[(.+?)\].*', '$1'
-                          Status = "NonCompliant"
-                          ResourceName = $resource.ResourceId
+                          RuleId         = $resource.ResourceId -replace '.*\[(.+?)\].*', '$1'
+                          Status         = "NonCompliant"
+                          ResourceName   = $resource.ResourceId
                           InDesiredState = $false
                       }
                   }
 
                   $resultObj = @{
-                      InDesiredState = $testResult.InDesiredState
-                      TotalResources = $findings.Count
-                      CompliantCount = ($findings | Where-Object { $_.InDesiredState }).Count
+                      InDesiredState    = $testResult.InDesiredState
+                      TotalResources    = $findings.Count
+                      CompliantCount    = ($findings | Where-Object { $_.InDesiredState }).Count
                       NonCompliantCount = ($findings | Where-Object { -not $_.InDesiredState }).Count
-                      OsTag = $osTag
-                      Findings = $findings
+                      OsVersion         = $osVer
+                      OsRole            = 'MS'
+                      Findings          = $findings
                   }
                   $resultObj | ConvertTo-Json -Depth 10 -Compress |
-                    Set-Content -Path $ResultPath -Encoding UTF8
+                      Set-Content -Path $ResultPath -Encoding UTF8
               } finally {
                   if (Test-Path $mofPath) { Remove-Item -Path $mofPath -Recurse -Force }
               }
@@ -162,7 +193,7 @@
               scan_type: scan
               framework: "{{ compliance_framework | default('DISA_STIG') }}"
               benchmark: "PowerSTIG DISA STIG"
-              benchmark_version: "{{ _powerstig_check.output | trim }}"
+              benchmark_version: "{{ _powerstig_version }}"
               target_host: "{{ inventory_hostname }}"
               target_os: "Windows Server {{ ansible_distribution_version | default('unknown') }}"
               scan_timestamp: "{{ ansible_date_time.iso8601 }}"
