@@ -157,22 +157,28 @@
                 {{ _powerstig_parsed.Findings | default([])
                    | map('security.compliance_windows.to_cff_powerstig') | list }}
 
+        - name: Resolve temp directory on target
+          ansible.windows.win_powershell:
+            script: $env:TEMP
+          register: _win_temp
+          changed_when: false
+
         - name: Write CFF JSON to temp file on target
           ansible.windows.win_copy:
             content: "{{ _cff_output | to_nice_json }}"
-            dest: "%TEMP%\\compliance-cff-{{ _scan_id }}.json"
+            dest: "{{ (_win_temp.output | first | trim) }}\\compliance-cff-{{ _scan_id }}.json"
           check_mode: false
 
         - name: Fetch CFF JSON back to execution node
           ansible.builtin.fetch:
-            src: "%TEMP%\\compliance-cff-{{ _scan_id }}.json"
+            src: "{{ (_win_temp.output | first | trim) }}\\compliance-cff-{{ _scan_id }}.json"
             dest: "{{ fetch_dest_dir }}/cff-{{ inventory_hostname }}.json"
             flat: true
 
       always:
         - name: Clean up temp files on target
           ansible.windows.win_file:
-            path: "%TEMP%\\compliance-cff-{{ _scan_id }}.json"
+            path: "{{ (_win_temp.output | default(['C:\\Windows\\Temp']) | first | trim) }}\\compliance-cff-{{ _scan_id }}.json"
             state: absent
           failed_when: false
 
