@@ -88,8 +88,9 @@
           ansible.windows.win_powershell:
             parameters:
               StigVersion: "{{ _stig_version }}"
+              ResultPath: "{{ (_win_temp.output | first | trim) }}\\compliance-dsc-result.json"
             script: |
-              param([string]$StigVersion)
+              param([string]$StigVersion, [string]$ResultPath)
               Import-Module PowerSTIG
 
               $osVersion = (Get-CimInstance Win32_OperatingSystem).Caption
@@ -136,7 +137,7 @@
                       Findings = $findings
                   }
                   $resultObj | ConvertTo-Json -Depth 10 -Compress |
-                    Set-Content -Path "$env:TEMP\compliance-dsc-result.json" -Encoding UTF8
+                    Set-Content -Path $ResultPath -Encoding UTF8
               } finally {
                   if (Test-Path $mofPath) { Remove-Item -Path $mofPath -Recurse -Force }
               }
