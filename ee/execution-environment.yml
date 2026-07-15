@@ -63,7 +63,7 @@ additional_build_steps:
     - RUN ansible-galaxy collection list infra.windows_ops
 
     # Verify WinRM connectivity deps
-    - RUN python3 -c "import winrm; print('pywinrm', winrm.__version__)"
+    - RUN python3 -c "import winrm; print('pywinrm OK')"
     - RUN python3 -c "import requests_credssp; print('credssp OK')"
     - RUN python3 -c "import requests_ntlm; print('ntlm OK')"
 
