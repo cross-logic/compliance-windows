@@ -78,6 +78,12 @@
               PowerSTIG {{ _powerstig_version }} on {{ inventory_hostname }}
               {{ '(installed ephemerally)' if _powerstig_was_installed | bool else '(pre-existing)' }}
 
+        - name: Resolve temp directory on target
+          ansible.windows.win_powershell:
+            script: $env:TEMP
+          register: _win_temp
+          changed_when: false
+
         - name: Run PowerSTIG DSC compliance scan (audit-only)
           ansible.windows.win_powershell:
             parameters:
@@ -121,7 +127,7 @@
                       }
                   }
 
-                  $Ansible.Result = @{
+                  $resultObj = @{
                       InDesiredState = $testResult.InDesiredState
                       TotalResources = $findings.Count
                       CompliantCount = ($findings | Where-Object { $_.InDesiredState }).Count
@@ -129,6 +135,8 @@
                       OsTag = $osTag
                       Findings = $findings
                   }
+                  $resultObj | ConvertTo-Json -Depth 10 -Compress |
+                    Set-Content -Path "$env:TEMP\compliance-dsc-result.json" -Encoding UTF8
               } finally {
                   if (Test-Path $mofPath) { Remove-Item -Path $mofPath -Recurse -Force }
               }
@@ -136,9 +144,14 @@
           timeout: 600
           changed_when: false
 
+        - name: Read DSC results from target
+          ansible.windows.win_slurp:
+            src: "{{ (_win_temp.output | first | trim) }}\\compliance-dsc-result.json"
+          register: _dsc_json_b64
+
         - name: Parse PowerSTIG results
           ansible.builtin.set_fact:
-            _powerstig_parsed: "{{ _powerstig_raw.result }}"
+            _powerstig_parsed: "{{ (_dsc_json_b64.content | b64decode) | from_json }}"
 
         - name: Transform findings to CFF
           ansible.builtin.set_fact:
@@ -157,12 +170,6 @@
                 {{ _powerstig_parsed.Findings | default([])
                    | map('security.compliance_windows.to_cff_powerstig') | list }}
 
-        - name: Resolve temp directory on target
-          ansible.windows.win_powershell:
-            script: $env:TEMP
-          register: _win_temp
-          changed_when: false
-
         - name: Write CFF JSON to temp file on target
           ansible.windows.win_copy:
             content: "{{ _cff_output | to_nice_json }}"
@@ -176,9 +183,15 @@
             flat: true
 
       always:
-        - name: Clean up temp files on target
+        - name: Clean up CFF temp file on target
           ansible.windows.win_file:
             path: "{{ (_win_temp.output | default(['C:\\Windows\\Temp']) | first | trim) }}\\compliance-cff-{{ _scan_id }}.json"
+            state: absent
+          failed_when: false
+
+        - name: Clean up DSC result file on target
+          ansible.windows.win_file:
+            path: "{{ (_win_temp.output | default(['C:\\Windows\\Temp']) | first | trim) }}\\compliance-dsc-result.json"
             state: absent
           failed_when: false
 
