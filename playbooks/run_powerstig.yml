@@ -145,7 +145,7 @@
           changed_when: false
 
         - name: Read DSC results from target
-          ansible.windows.win_slurp:
+          ansible.builtin.slurp:
             src: "{{ (_win_temp.output | first | trim) }}\\compliance-dsc-result.json"
           register: _dsc_json_b64
 
