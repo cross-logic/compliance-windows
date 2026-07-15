@@ -48,19 +48,35 @@
 
     - name: Run PowerSTIG scan and normalize to CFF
       block:
-        - name: Verify PowerSTIG module is installed
+        - name: Check if PowerSTIG module is installed
           ansible.windows.win_powershell:
             script: |
-              if (-not (Get-Module -ListAvailable -Name PowerSTIG)) {
-                throw "PowerSTIG module is not installed. Install with: Install-Module -Name PowerSTIG -Force -Scope AllUsers"
-              }
               $mod = Get-Module -ListAvailable -Name PowerSTIG | Select-Object -First 1
-              $mod.Version.ToString()
+              if ($mod) { $mod.Version.ToString() } else { "NOT_INSTALLED" }
           register: _powerstig_check
+          changed_when: false
+
+        - name: Install PowerSTIG module (agentless — ADR-008 pattern)
+          ansible.windows.win_powershell:
+            script: |
+              [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+              Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers | Out-Null
+              Install-Module -Name PowerSTIG -Force -Scope AllUsers -AllowClobber
+              (Get-Module -ListAvailable -Name PowerSTIG | Select-Object -First 1).Version.ToString()
+          register: _powerstig_install
+          when: (_powerstig_check.output | default(['']) | first | trim) == "NOT_INSTALLED"
+
+        - name: Set PowerSTIG version fact
+          ansible.builtin.set_fact:
+            _powerstig_version: >-
+              {{ (_powerstig_install.output | default(_powerstig_check.output) | first | default('unknown')) | trim }}
+            _powerstig_was_installed: "{{ (_powerstig_check.output | default(['']) | first | trim) == 'NOT_INSTALLED' }}"
 
         - name: Report PowerSTIG version
           ansible.builtin.debug:
-            msg: "PowerSTIG {{ _powerstig_check.output | trim }} on {{ inventory_hostname }}"
+            msg: >-
+              PowerSTIG {{ _powerstig_version }} on {{ inventory_hostname }}
+              {{ '(installed ephemerally)' if _powerstig_was_installed | bool else '(pre-existing)' }}
 
         - name: Run PowerSTIG DSC compliance scan (audit-only)
           ansible.windows.win_powershell:
@@ -158,6 +174,14 @@
           ansible.windows.win_file:
             path: "%TEMP%\\compliance-cff-{{ _scan_id }}.json"
             state: absent
+          failed_when: false
+
+        - name: Remove PowerSTIG module (agentless cleanup)
+          ansible.windows.win_powershell:
+            script: |
+              Remove-Module -Name PowerSTIG -Force -ErrorAction SilentlyContinue
+              Uninstall-Module -Name PowerSTIG -AllVersions -Force -ErrorAction SilentlyContinue
+          when: _powerstig_was_installed | default(false) | bool
           failed_when: false
 
     - name: Report scan status
