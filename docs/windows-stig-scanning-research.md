@@ -109,6 +109,106 @@ own internal content library:
 
 ---
 
+## Multi-Version Scanning via CPE Auto-Selection
+
+SCC supports loading ALL Windows Server benchmarks (WS2016–2025) simultaneously.
+The SCAP standard's **CPE (Common Platform Enumeration)** mechanism handles
+per-host version matching automatically — no Ansible-side OS detection needed.
+
+### How it works
+
+1. Each benchmark contains `<xccdf:platform>` elements with CPE identifiers
+   (e.g., `cpe:/o:microsoft:windows_server_2022`)
+2. SCC runs CPE-OVAL checks against each target to determine its OS
+3. Non-matching benchmarks are skipped (rules marked `notapplicable`)
+4. Only the matching benchmark produces real pass/fail results
+
+This is mandated by the SCAP specification (NIST SP 800-126). SCC, as a
+[NIST SCAP-validated product](https://csrc.nist.gov/projects/scap-validation-program/validated-products-and-modules/147),
+must correctly implement CPE applicability.
+
+The SCC User Manual confirms this with a "Run All Content (Ignore CPE
+Applicability)" override option — its existence proves CPE filtering is
+the default behavior.
+
+### Mixed-version inventories
+
+A single SCC deployment with all 4 benchmarks enabled can scan a mixed
+inventory (WS2019 + WS2022 + WS2025 hosts). CPE handles per-host selection.
+SCC generates result files for all enabled benchmarks per host — non-matching
+ones contain only `notapplicable` results. Our normalizer already skips
+`notapplicable` (in `SKIP_STATUSES`).
+
+Source: [SCC automation guide](https://www.careermentorgroup.com/post/automating-scap-compliance-checks-with-scc-scans-and-gitlab)
+— "there is only one Windows SCC package which can subsequently scan any
+Windows machine."
+
+---
+
+## SCC Licensing and Distribution
+
+### Risk assessment by distribution model
+
+| Model | Risk | Analysis |
+|-------|------|----------|
+| Ephemeral download from dl.dod.cyber.mil | **LOW** | Chocolatey precedent — automate user's own download |
+| SCAP content pre-baked in EE | **LOW** | Public domain (17 USC 105, NIWC GitHub LICENSE.md) |
+| Pre-configured options.xml in EE | **NONE** | Our configuration, no SCC IP |
+| SCC binary cached on execution node | **LOW-MEDIUM** | Standard caching, not redistribution |
+| SCC binary baked into EE image | **HIGH** | Redistribution — conflicts with Ignyte exclusive deal |
+| SCC binary stored in PAH | **HIGH** | Same as above |
+
+### Key legal facts
+
+- SCC binary: public domain (17 USC 105), Distribution Statement A, BUT
+  source code is trade secret with exclusive commercial license to Ignyte
+- SCAP benchmarks: public domain, freely redistributable
+- SCC EULA text is not publicly available outside installer/manual appendix
+- No vendor precedent for embedding SCC binaries in commercial products
+- Chocolatey downloads at install time, never embeds
+
+### Conclusion
+
+**Ephemeral download + pre-baked content** is the correct model:
+- We ship SCAP benchmarks + options.xml in the EE (safe, public domain)
+- SCC binary is downloaded from DISA at scan time (never redistributed by us)
+- Cache on execution node for subsequent scans
+- Air-gapped: user manually places SCC bundle following our docs
+
+Sources:
+- [NIWC/Ignyte licensing agreement](https://www.niwcatlantic.navy.mil/Media/Article/3432729/)
+- [Chocolatey SCC package](https://community.chocolatey.org/packages/scap-compliance-checker)
+- [DVIDS: SCC for Public Use](https://www.dvidshub.net/news/391602/)
+- Existing analysis: `review/disa-scc-legal-distribution-analysis.md`
+
+---
+
+## Recommended Deployment Architecture
+
+```
+EE Build Time (safe to redistribute):
+  ├── SCAP benchmark ZIPs (WS2016, WS2019, WS2022, WS2025) — public domain
+  ├── Pre-configured options.xml (all 4 benchmarks enabled) — our config
+  └── Ansible collection (playbooks, normalizer) — our code
+
+Scan Time (ephemeral):
+  1. Download SCC portable ZIP from dl.dod.cyber.mil (cache on EE node)
+  2. Extract SCC, inject our content + options.xml into Resources/Content/
+  3. Deploy configured SCC to Windows targets
+  4. cscc.exe -u <results_dir> — CPE auto-selects correct benchmark
+  5. Fetch XCCDF results, cleanup SCC from targets
+  6. Normalize to CFF, POST to dashboard API
+```
+
+Benefits:
+- Single artifact for all Windows Server versions (2016–2025)
+- Automatic version matching via CPE (no Ansible OS-detection logic)
+- Legal safety — SCC binary never redistributed
+- Content lifecycle — update benchmark ZIPs quarterly, rebuild EE
+- Air-gap support — cache persists after first download
+
+---
+
 ## Content Lifecycle Management
 
 ### DISA Release Cycle
@@ -123,20 +223,22 @@ own internal content library:
 
 ```
 DISA quarterly release
-  → NIWC publishes enhanced content to GitHub (~2-4 weeks later)
-    → Download new benchmark ZIPs
-      → Install into SCC reference instance (configure, enable, select profile)
-        → Archive configured SCC portable directory
-          → Deploy archive as scan-time artifact
-            → Next scan uses new content automatically
+  → Download new benchmark ZIPs from public.cyber.mil/stigs/scap/
+    → Place in ee/_build/scap-content/ (replaces previous versions)
+      → Update options.xml if new content streams added
+        → Rebuild EE → push to PAH
+          → Next scan uses new content automatically
 ```
 
 ### options.xml Management
 
-- Plain XML file, configure-and-copy pattern
-- Configure one reference instance via `cscc --config` or GUI
-- Copy the resulting `options.xml` to all target deployments
-- Do NOT try to programmatically generate from scratch (undocumented internal structure)
+- Plain XML file stored in `ee/_build/scc-config/options.xml`
+- Initial creation: configure one SCC instance via `cscc --config` or GUI
+  on a Windows host, export the resulting `options.xml`
+- Enable all Windows Server benchmarks + select appropriate profiles
+- At scan time: Ansible injects this file into the downloaded SCC's directory
+- Do NOT try to programmatically generate from scratch (undocumented internal
+  structure) — configure-and-copy is the supported pattern
 
 ### Version Tracking
 
