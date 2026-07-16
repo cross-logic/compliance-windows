@@ -13,8 +13,13 @@
 # DSC (Desired State Configuration) is built into Windows Server 2012 R2+.
 # No DSC certificate or LCM configuration is needed — PowerSTIG runs as SYSTEM.
 #
-# This is the recommended default scanner. For SCAP 1.3 certified scanning,
-# use run_scc.yml instead (see docs/scanner-selection-guide.md).
+# Secondary scanner for domain-joined hosts with Active Directory and
+# certificate infrastructure. For standalone hosts or SCAP 1.3 certified
+# scanning, use run_scc.yml (the default). See docs/scanner-selection-guide.md.
+#
+# REQUIREMENT: Target hosts must be domain-joined. Test-DscConfiguration
+# is unsupported on standalone/workgroup hosts across all Windows Server
+# versions (2016-2025). See docs/dsc-windows-server-2025-research.md.
 #
 # Variables:
 #   compliance_target_hosts: inventory pattern to scan (default: all)

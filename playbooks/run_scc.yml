@@ -24,8 +24,8 @@
 # and removed afterward. The target Windows host does NOT need any
 # pre-installed compliance software. Zero persistent footprint (ADR-008).
 #
-# For the recommended PowerSTIG scanner (no external downloads required),
-# use run_powerstig.yml instead. See docs/scanner-selection-guide.md.
+# This is the recommended default scanner. For DSC-based scanning on
+# domain-joined hosts, use run_powerstig.yml. See docs/scanner-selection-guide.md.
 #
 # Variables:
 #   scc_version: DISA SCC version to download (default: 5.10.2)
@@ -74,17 +74,24 @@
             timeout: 300
           register: _scc_download
 
-        - name: Warn if checksum not pinned
-          ansible.builtin.debug:
-            msg: >-
-              WARNING: scc_bundle_checksum is not set. Download integrity is not verified.
-              Set scc_bundle_checksum to "sha256:<hash>" for production use.
-              Checksums are published in SCC release notes at dl.dod.cyber.mil.
-          when: scc_bundle_checksum | default('') | length == 0
-
         - name: Report successful download
           ansible.builtin.debug:
             msg: "Downloaded SCC {{ scc_version }} from {{ scc_download_url }}"
+
+        - name: Validate downloaded file is a ZIP archive
+          ansible.builtin.command:
+            cmd: "file {{ scc_zip_path }}"
+          register: _file_type
+          changed_when: false
+
+        - name: Fail if download is not a ZIP (likely an HTML login page)
+          ansible.builtin.fail:
+            msg: >-
+              Downloaded file is not a ZIP archive ({{ _file_type.stdout }}).
+              DISA Cyber Exchange (dl.dod.cyber.mil) may require CAC/PKI authentication.
+              Pre-stage the SCC bundle manually: download from https://dl.dod.cyber.mil
+              on a CAC-enabled workstation and place it at {{ scc_zip_path }}.
+          when: "'Zip archive' not in _file_type.stdout"
 
       rescue:
         - name: Check if cached SCC exists
@@ -95,17 +102,16 @@
         - name: Fail if no cache and download failed
           ansible.builtin.fail:
             msg: >-
-              Failed to download SCC {{ scc_version }} and no cached copy found.
-              On first run, the execution node needs internet access to download from
-              {{ scc_download_url }}. For air-gapped environments, pre-stage the bundle
-              at {{ scc_zip_path }} on the execution node.
+              SCC {{ scc_version }} not available. DISA Cyber Exchange typically
+              requires CAC/PKI authentication for downloads. Pre-stage the bundle:
+              1. Download from https://dl.dod.cyber.mil on a CAC-enabled workstation
+              2. Transfer to the execution node: {{ scc_zip_path }}
+              The scan will use the cached copy on subsequent runs.
           when: not _scc_cached.stat.exists
 
         - name: Warn about using cached SCC
           ansible.builtin.debug:
-            msg: >-
-              WARNING: Download failed, using cached SCC {{ scc_version }} from {{ scc_zip_path }}.
-              This may be outdated. Ensure the execution node has internet access for fresh downloads.
+            msg: "Using cached SCC {{ scc_version }} from {{ scc_zip_path }}"
 
     # Unzip SCC to cache directory
     - name: Extract SCC bundle to cache directory
@@ -322,6 +328,7 @@
         framework: "DISA_STIG"
         certification_status: "certified"
         certification_authority: "SCAP 1.3"
+        scanner_name: "scc"
         rules_metadata_file: "{{ (_rules_files.files | default([]) | first | default({})).path | default('') }}"
         compose_post_body: "{{ (backstage_api_url | default('')) | length > 0 }}"
         post_body_format: ndjson

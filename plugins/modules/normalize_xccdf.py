@@ -55,6 +55,12 @@ options:
     required: false
     default: ""
     version_added: "0.1.0"
+  scanner_name:
+    description: Scanner identifier for findings output (e.g. openscap, scc).
+    type: str
+    required: false
+    default: openscap
+    version_added: "0.1.0"
 author:
   - Ansible Security Team (@ansible)
 '''

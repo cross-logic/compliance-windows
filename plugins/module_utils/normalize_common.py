@@ -35,7 +35,6 @@ STATUS_MAP = {
     'error': 'error',
     'unknown': 'error',
     'notapplicable': 'not_applicable',
-    'notchecked': 'not_checked',
     'informational': 'pass',
     'fixed': 'pass',
 }
@@ -94,7 +93,7 @@ def find_ns(root):
     return ''
 
 
-def parse_xccdf_results(filepath, framework='auto'):
+def parse_xccdf_results(filepath, framework='auto', scanner_name='openscap'):
     """Parse an XCCDF result XML file and return normalized findings."""
     tree = ET.parse(filepath)
     root = tree.getroot()
@@ -191,9 +190,9 @@ def parse_xccdf_results(filepath, framework='auto'):
 
         meta = rule_meta.get(rule_id, {})
 
-        short_rule_id = re.sub(
-            r'^xccdf_org\.ssgproject\.content_rule_', '', rule_id,
-        )
+        short_rule_id = re.sub(r'^xccdf_org\.ssgproject\.content_rule_', '', rule_id)
+        short_rule_id = re.sub(r'^xccdf_mil\.disa\.stig_rule_', '', short_rule_id)
+        short_rule_id = re.sub(r'_rule$', '', short_rule_id)
 
         rule_title = meta.get('title', short_rule_id)
         fix_text = meta.get('fix_text', '')
@@ -212,7 +211,7 @@ def parse_xccdf_results(filepath, framework='auto'):
             'severity': SEVERITY_MAP.get(severity_attr, 'CAT_II'),
             'status': STATUS_MAP.get(status_text, 'error'),
             'host': host,
-            'scanner': 'openscap',
+            'scanner': scanner_name,
             'evidence': {
                 'actual': status_text,
                 'expected': 'pass',
@@ -240,6 +239,7 @@ def run_normalize(module):
     cert_authority = module.params['certification_authority']
     framework = module.params['framework']
     rules_metadata_file = module.params['rules_metadata_file']
+    scanner_name = module.params.get('scanner_name', 'openscap')
 
     rules_metadata_map = load_rules_metadata_map(rules_metadata_file)
 
@@ -253,7 +253,7 @@ def run_normalize(module):
             continue
 
         try:
-            host, findings = parse_xccdf_results(filepath, framework)
+            host, findings = parse_xccdf_results(filepath, framework, scanner_name)
             hosts_processed += 1
             all_findings.extend(findings)
 
@@ -285,8 +285,8 @@ def run_normalize(module):
 
     report = {
         'schema_version': '1.0.0',
-        'scanner': 'openscap',
-        'profile': profile_name or 'OpenSCAP Compliance Scan',
+        'scanner': scanner_name,
+        'profile': profile_name or 'Compliance Scan',
         'certification': certification,
         'timestamp': '',
         'hosts_processed': hosts_processed,
@@ -360,4 +360,5 @@ ARGUMENT_SPEC = dict(
     finalize=dict(type='bool', required=False, default=False),
     post_body_format=dict(type='str', required=False, default='ndjson',
                           choices=['json', 'ndjson']),
+    scanner_name=dict(type='str', required=False, default='openscap'),
 )
