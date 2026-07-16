@@ -80,18 +80,19 @@
 
         - name: Validate downloaded file is a ZIP archive
           ansible.builtin.command:
-            cmd: "file {{ scc_zip_path }}"
-          register: _file_type
+            cmd: "python3 -c \"import zipfile, sys; sys.exit(0 if zipfile.is_zipfile('{{ scc_zip_path }}') else 1)\""
+          register: _zip_check
           changed_when: false
+          failed_when: false
 
         - name: Fail if download is not a ZIP (likely an HTML login page)
           ansible.builtin.fail:
             msg: >-
-              Downloaded file is not a ZIP archive ({{ _file_type.stdout }}).
-              DISA Cyber Exchange (dl.dod.cyber.mil) may require CAC/PKI authentication.
+              Downloaded file is not a valid ZIP archive.
+              DISA Cyber Exchange may have returned an HTML login page.
               Pre-stage the SCC bundle manually: download from https://dl.dod.cyber.mil
               on a CAC-enabled workstation and place it at {{ scc_zip_path }}.
-          when: "'Zip archive' not in _file_type.stdout"
+          when: _zip_check.rc != 0
 
       rescue:
         - name: Check if cached SCC exists
@@ -113,18 +114,26 @@
           ansible.builtin.debug:
             msg: "Using cached SCC {{ scc_version }} from {{ scc_zip_path }}"
 
-    # Unzip SCC to cache directory
-    - name: Extract SCC bundle to cache directory
+    # Extract bundle ZIP (contains installer + portable inner ZIP)
+    - name: Extract SCC bundle
       ansible.builtin.unarchive:
         src: "{{ scc_zip_path }}"
         dest: "{{ scc_cache_dir }}"
         remote_src: true
         creates: "{{ scc_cache_dir }}/scc-{{ scc_version }}_Windows"
 
-    # Find cscc.exe inside extracted directory
-    - name: Locate cscc.exe in extracted bundle
+    # The bundle contains a portable ZIP inside: scc-<ver>_Windows/scc-<ver>_Windows.zip
+    # Extract the inner ZIP to get the portable cscc.exe deployment
+    - name: Extract portable SCC from inner ZIP
+      ansible.builtin.unarchive:
+        src: "{{ scc_cache_dir }}/scc-{{ scc_version }}_Windows/scc-{{ scc_version }}_Windows.zip"
+        dest: "{{ scc_cache_dir }}"
+        remote_src: true
+        creates: "{{ scc_cache_dir }}/scc_{{ scc_version }}"
+
+    - name: Locate cscc.exe in portable deployment
       ansible.builtin.find:
-        paths: "{{ scc_cache_dir }}/scc-{{ scc_version }}_Windows"
+        paths: "{{ scc_cache_dir }}"
         patterns: "cscc.exe"
         recurse: true
       register: _cscc_exe_files
