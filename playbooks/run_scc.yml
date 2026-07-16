@@ -49,12 +49,13 @@
   gather_facts: false
 
   vars:
-    scc_version: "5.10.2"
+    scc_version: "5.14"
     scc_download_url: "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/scc-{{ scc_version }}_Windows_bundle.zip"
     scc_bundle_checksum: ""
     scc_cache_dir: /tmp/compliance-scc
     scc_zip_filename: "scc-{{ scc_version }}_Windows_bundle.zip"
     scc_zip_path: "{{ scc_cache_dir }}/{{ scc_zip_filename }}"
+    scap_content_ee_dir: /usr/share/scap/windows
 
   tasks:
     - name: Create SCC cache directory
@@ -143,9 +144,32 @@
       ansible.builtin.set_fact:
         cscc_exe_dir: "{{ (_cscc_exe_files.files | first).path | dirname }}"
 
+    # Inject SCAP benchmark content from EE into SCC's content directory
+    # SCC manages content internally — we place benchmark ZIPs in its
+    # Resources/Content/ directory. CPE auto-selects the right benchmark
+    # per host OS version (WS2016, WS2019, WS2022, WS2025).
+    - name: Find SCAP benchmark ZIPs in EE
+      ansible.builtin.find:
+        paths: "{{ scap_content_ee_dir }}"
+        patterns: "*.zip"
+      register: _scap_zips
+      failed_when: false
+
+    - name: Copy SCAP benchmarks into SCC content directory
+      ansible.builtin.copy:
+        src: "{{ item.path }}"
+        dest: "{{ cscc_exe_dir }}/Resources/Content/"
+        mode: '0644'
+      loop: "{{ _scap_zips.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _scap_zips.files | default([]) | length > 0
+
     - name: Report SCC location
       ansible.builtin.debug:
-        msg: "SCC ready at {{ cscc_exe_dir }}/cscc.exe"
+        msg: >-
+          SCC ready at {{ cscc_exe_dir }}/cscc.exe
+          ({{ (_scap_zips.files | default([])) | length }} SCAP benchmarks injected)
 
 
 # ── Play 1: Scan Windows targets via WinRM ─────────────────────────────
@@ -155,19 +179,9 @@
   gather_facts: true
 
   vars:
-    # SCC was extracted to cache dir by Play 0
-    scc_cache_dir: /tmp/compliance-scc
-    scc_version: "{{ hostvars['localhost']['scc_version'] }}"
     cscc_exe_dir: "{{ hostvars['localhost']['cscc_exe_dir'] }}"
-
-    # SCAP benchmark content path in EE
-    # The EE has the DISA Windows Server STIG SCAP Benchmark pre-installed
-    scap_benchmark_ee_path: /usr/share/scap/windows
-
-    # Target paths on Windows
     target_results_dir: 'C:\Temp\compliance-scan'
     target_scc_dir: 'C:\Temp\compliance-scc'
-    target_scap_dir: 'C:\Temp\compliance-scap'
 
     # Fetch destination on EE
     fetch_dest_dir: /tmp/compliance-results
@@ -181,55 +195,46 @@
             path: "{{ target_scc_dir }}"
             state: directory
 
-        - name: Copy SCC to target
+        - name: Copy SCC (with injected SCAP content) to target
           ansible.windows.win_copy:
             src: "{{ cscc_exe_dir }}/"
             dest: "{{ target_scc_dir }}"
-          register: _scc_copy
 
-        # ── Copy SCAP benchmark from EE to target ─────────────────────────
-        - name: Create SCAP content directory on target
-          ansible.windows.win_file:
-            path: "{{ target_scap_dir }}"
-            state: directory
-
-        - name: Copy SCAP benchmark content to target
-          ansible.windows.win_copy:
-            src: "{{ scap_benchmark_ee_path }}/"
-            dest: "{{ target_scap_dir }}"
-          register: _scap_copy
-
-        # ── Run SCC unattended scan ────────────────────────────────────────
-        # SCC CLI (cscc.exe) in portable deployment:
-        #   -u: unattended mode (no GUI, batch/scripted operation)
-        #   --scap <dir>: path to SCAP benchmark content
-        #   --output <dir>: output directory for XCCDF results
-        #   --setOpt flat_results=true: flatten output (no nested folders)
-        # Exit codes: 0=all pass, 1=some fail (both valid), >1=error
-        # Override via scc_cli_extra_args for version-specific flags.
+        # ── Run SCC scan ──────────────────────────────────────────────
+        # SCC CLI reference:
+        #   -u <path>: output/results directory
+        #   --setOpt dirXxxEnabled 0: flatten result directory structure
+        # SCAP content is inside SCC (Resources/Content/, injected in Play 0)
+        # CPE auto-selects the correct benchmark per host OS version
         - name: Create results directory on target
           ansible.windows.win_file:
             path: "{{ target_results_dir }}"
             state: directory
 
-        - name: Run SCC unattended scan
+        - name: Run SCC scan
           ansible.windows.win_command:
             cmd: >-
               {{ target_scc_dir }}\cscc.exe
-              -u
-              --scap {{ target_scap_dir }}
-              --output {{ target_results_dir }}
-              --setOpt flat_results=true
+              -u {{ target_results_dir }}
+              --setOpt dirAllSessionsEnabled 0
+              --setOpt dirContentTypeEnabled 0
+              --setOpt dirSessionEnabled 0
+              --setOpt dirSessionResultsEnabled 0
+              --setOpt dirStreamNameEnabled 0
+              --setOpt dirTargetNameEnabled 0
+              --setOpt dirXMLEnabled 0
+            chdir: "{{ target_scc_dir }}"
           register: _scan_result
-          # SCC exit codes: 0=all pass, 1=some fail (both valid), >1=error
           failed_when: _scan_result.rc > 1
           changed_when: false
+          timeout: 1800
 
         # ── Fetch XCCDF results from target to EE ──────────────────────────
         - name: Find XCCDF result XML files on target
           ansible.windows.win_find:
             paths: "{{ target_results_dir }}"
-            patterns: "*-xccdf.xml"
+            patterns: "*XCCDF*.xml"
+            recurse: true
           register: _result_files_target
 
         - name: Fail if no XCCDF results found
@@ -263,11 +268,6 @@
         - name: Remove scan results from target
           ansible.windows.win_file:
             path: "{{ target_results_dir }}"
-            state: absent
-
-        - name: Remove SCAP content from target
-          ansible.windows.win_file:
-            path: "{{ target_scap_dir }}"
             state: absent
 
         - name: Remove SCC from target
@@ -306,7 +306,7 @@
     - name: Find all fetched XCCDF result files
       ansible.builtin.find:
         paths: "{{ fetch_dest_dir }}"
-        patterns: "xccdf-results-*.xml"
+        patterns: "xccdf-results-*.xml,*XCCDF*.xml"
       register: _result_files
 
     - name: Fail if no results found
