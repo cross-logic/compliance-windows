@@ -230,7 +230,6 @@
             cmd: >-
               {{ target_scc_dir }}\cscc.exe
               -u {{ target_results_dir }}
-              --doNotSaveChanges
               --setOpt dirAllSessionsEnabled 0
               --setOpt dirContentTypeEnabled 0
               --setOpt dirSessionEnabled 0
