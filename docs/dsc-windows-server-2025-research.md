@@ -1,13 +1,17 @@
-# DSC on Windows Server 2025 — Research & Compatibility Notes
+# DSC on Windows Server — Standalone Scanning Research & Compatibility Notes
 
 This document captures research into DSC (Desired State Configuration) behavior
-on Windows Server 2025 standalone (non-domain-joined) hosts, specifically when
+on standalone (non-domain-joined) Windows Server hosts, specifically when
 using PowerSTIG for DISA STIG compliance auditing via Ansible.
+
+**Conclusion**: `Test-DscConfiguration -ReferenceConfiguration` with PowerSTIG
+is unsupported on standalone hosts across ALL Windows Server versions
+(2016–2025). DISA SCC is the recommended scanner for standalone environments.
 
 ## Problem Statement
 
-`Test-DscConfiguration -ReferenceConfiguration $MofFile` fails on Windows
-Server 2025 standalone EC2 hosts with:
+`Test-DscConfiguration -ReferenceConfiguration $MofFile` fails on standalone
+Windows Server hosts with:
 
 ```
 Could not find mandatory property Thumbprint.
@@ -18,12 +22,35 @@ This affects ALL DSC testing cmdlets (`Test-DscConfiguration`,
 `Start-DscConfiguration`, `Publish-DscConfiguration`) when processing a
 PowerSTIG-compiled MOF.
 
+## Cross-Version Evidence
+
+The error is NOT exclusive to Windows Server 2025. The same class of error has
+been reported on all modern Windows Server versions:
+
+| Version | Error | Source |
+|---------|-------|--------|
+| WS2016 | "mandatory property" errors in DSC | [Ansible-win_dsc #22](https://github.com/trondhindenes/Ansible-win_dsc/issues/22), [SqlServerDsc #11](https://github.com/dsccommunity/SqlServerDsc/issues/11) |
+| WS2019 | "Could not find mandatory property Identity" with PowerSTIG | [PowerSTIG #914](https://github.com/microsoft/PowerStig/issues/914) |
+| WS2022 | "required property Identity is missing" with PowerSTIG | [PowerSTIG #1262](https://github.com/microsoft/PowerStig/issues/1262) |
+| WS2025 | "mandatory property Thumbprint" with PowerSTIG | Our testing (jobs 4286–4335) + [mehic.se](https://mehic.se/2026/02/07/desired-state-configuration-dsc-windows-server-2025-and-rds-2025-nightmare-and-solution/) |
+
+No confirmed success for PowerSTIG + `Test-DscConfiguration -ReferenceConfiguration`
+on standalone hosts on ANY version. DSCEA (Microsoft's own audit tool) explicitly
+requires Active Directory domain membership.
+
+WS2025 makes it worse with stricter `schema.mof` validation, but the
+fundamental issue exists across all versions.
+
 ## Root Cause (confirmed Jul 16, 2026)
 
-The error originates from **DSC resource instances inside the compiled MOF**
-that reference certificate thumbprints. On WS2025 standalone hosts without
-Active Directory or certificate infrastructure, the DSC engine validates these
-properties against the local certificate store and fails.
+The error originates from the **LCM (`MSFT_DSCLocalConfigurationManager`)**
+when processing credential-related content in the compiled MOF. On standalone
+hosts without Active Directory or certificate infrastructure, the DSC engine
+cannot validate these properties and fails.
+
+The `NTFSAccessControlEntry` initially suspected as containing a Thumbprint
+was a red herring — its schema has no Thumbprint property. The error is from
+the LCM's own meta-configuration validation path.
 
 ### What was ruled out
 
@@ -187,14 +214,15 @@ Source: [Remove-DscConfigurationDocument](https://learn.microsoft.com/en-us/powe
 
 ## Fix Options
 
-### Option A: Default WS2025 standalone to SCC scanner
+### Option A: SCC as default scanner — SELECTED
 
 **Complexity**: Low | **Confidence**: High
 
-The `run_scc.yml` path already exists with no DSC dependency. Change
-`scanner_mode` default in `install.yml` to `scc` for standalone hosts.
-PowerSTIG becomes opt-in for domain-joined hosts where cert infrastructure
-exists.
+The `run_scc.yml` path already exists with no DSC dependency. SCC has
+broader STIG coverage (247/247 vs 206/247 rules), SCAP 1.3 certification,
+and works on both standalone and domain-joined hosts. Change `scanner_mode`
+default in `install.yml` to `scc`. PowerSTIG becomes opt-in for
+domain-joined hosts that specifically need DSC-based scanning.
 
 ### Option B: Invoke-DscResource per-resource testing
 
