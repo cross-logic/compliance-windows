@@ -213,6 +213,83 @@
           ansible.builtin.debug:
             msg: "MOF compiled: {{ _mof_info.MofFile }} (OS={{ _mof_info.OsVersion }}, standalone={{ _mof_info.IsStandalone }})"
 
+        - name: "DSC Diagnostic: Inspect MOF + system MetaConfig state"
+          ansible.windows.win_powershell:
+            parameters:
+              MofDir: "{{ _mof_info.MofDir }}"
+            script: |
+              param([string]$MofDir)
+              $diag = @{}
+
+              # Check compilation output for meta.mof
+              $diag['CompilationFiles'] = @(Get-ChildItem $MofDir -Filter '*.mof' | Select-Object Name, Length)
+
+              # Check system-level MetaConfig
+              $sysConfig = 'C:\Windows\System32\Configuration'
+              $metaPath = Join-Path $sysConfig 'MetaConfig.mof'
+              if (Test-Path $metaPath) {
+                  $diag['SystemMetaConfigExists'] = $true
+                  $diag['SystemMetaConfigContent'] = (Get-Content $metaPath -Raw).Substring(0, [Math]::Min(2000, (Get-Content $metaPath -Raw).Length))
+              } else {
+                  $diag['SystemMetaConfigExists'] = $false
+              }
+
+              # Check ALL mof files in system config dir
+              $diag['SystemConfigFiles'] = @(Get-ChildItem $sysConfig -Filter '*.mof*' -ErrorAction SilentlyContinue | Select-Object Name, Length)
+
+              # LCM state
+              $lcm = Get-DscLocalConfigurationManager
+              $diag['LCM_RefreshMode'] = $lcm.RefreshMode
+              $diag['LCM_CertificateID'] = $lcm.CertificateID
+              $diag['LCM_ConfigurationMode'] = $lcm.ConfigurationMode
+
+              $diag | ConvertTo-Json -Depth 5 -Compress
+          register: _diag
+          changed_when: false
+
+        - name: Report diagnostic
+          ansible.builtin.debug:
+            msg: "{{ (_diag.output | join('')) }}"
+
+        - name: "Clean system-level MetaConfig if it has CertificateID"
+          ansible.windows.win_powershell:
+            script: |
+              $sysConfig = 'C:\Windows\System32\Configuration'
+              # Delete any stale MetaConfig from previous cert-based attempts
+              Remove-Item "$sysConfig\MetaConfig.mof" -Force -ErrorAction SilentlyContinue
+              Remove-Item "$sysConfig\MetaConfig.mof.checksum" -Force -ErrorAction SilentlyContinue
+              # Also clean any pending/previous configs that might reference certs
+              Remove-Item "$sysConfig\Previous.mof" -Force -ErrorAction SilentlyContinue
+              Remove-Item "$sysConfig\Current.mof" -Force -ErrorAction SilentlyContinue
+              Remove-Item "$sysConfig\Pending.mof" -Force -ErrorAction SilentlyContinue
+              Remove-Item "$sysConfig\backup.mof" -Force -ErrorAction SilentlyContinue
+              Remove-Item "$sysConfig\*.mof.checksum" -Force -ErrorAction SilentlyContinue
+
+              # Re-apply clean LCM with Push mode (no cert, no pull)
+              [DSCLocalConfigurationManager()]
+              configuration CleanLCM {
+                  Node 'localhost' {
+                      Settings { RefreshMode = 'Push' }
+                  }
+              }
+              $lcmDir = Join-Path $env:TEMP 'CleanLCM'
+              CleanLCM -OutputPath $lcmDir | Out-Null
+              Set-DscLocalConfigurationManager -Path $lcmDir -Force
+              Remove-Item $lcmDir -Recurse -Force -ErrorAction SilentlyContinue
+
+              $lcm = Get-DscLocalConfigurationManager
+              @{
+                  RefreshMode = $lcm.RefreshMode
+                  CertificateID = $lcm.CertificateID
+                  SystemMofFiles = @(Get-ChildItem 'C:\Windows\System32\Configuration' -Filter '*.mof*' -EA SilentlyContinue | Select Name)
+              } | ConvertTo-Json -Depth 3 -Compress
+          register: _clean_lcm
+          changed_when: false
+
+        - name: Report clean LCM state
+          ansible.builtin.debug:
+            msg: "{{ (_clean_lcm.output | join('')) }}"
+
         # Step 3: Audit compliance with Test-DscConfiguration -ReferenceConfiguration
         # This tests the target's CURRENT state against the compiled MOF
         # WITHOUT applying or modifying anything (pure audit, not enforcement).
