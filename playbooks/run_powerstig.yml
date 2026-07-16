@@ -228,6 +228,35 @@
           ansible.builtin.debug:
             msg: "MOF compiled: {{ _mof_info.MofFile }} (OS={{ _mof_info.OsVersion }}, standalone={{ _mof_info.IsStandalone }})"
 
+        # Diagnostic: inspect compiled MOF for Thumbprint references
+        - name: "DSC Diagnostic: Inspect MOF for Thumbprint resources"
+          ansible.windows.win_powershell:
+            parameters:
+              MofFile: "{{ _mof_info.MofFile }}"
+            script: |
+              param([string]$MofFile)
+              $content = Get-Content $MofFile -Raw
+              # Find all instance blocks that contain Thumbprint
+              $pattern = 'instance of (\S+).*?\{[^}]*Thumbprint[^}]*\}'
+              $matches = [regex]::Matches($content, $pattern, 'Singleline')
+              $results = @()
+              foreach ($m in $matches) {
+                  $resourceType = $m.Groups[1].Value
+                  $block = $m.Value.Substring(0, [Math]::Min(200, $m.Value.Length))
+                  $results += @{ ResourceType = $resourceType; Preview = $block }
+              }
+              @{
+                  TotalMofLength = $content.Length
+                  ThumbprintResources = $results
+                  Count = $results.Count
+              } | ConvertTo-Json -Depth 5 -Compress
+          register: _mof_diagnostic
+          changed_when: false
+
+        - name: Report MOF Thumbprint resources
+          ansible.builtin.debug:
+            msg: "{{ (_mof_diagnostic.output | join('')) }}"
+
         # Step 3: Run Test-DscConfiguration (audit-only)
         - name: "DSC Step 3: Test compliance (audit-only)"
           ansible.windows.win_powershell:
