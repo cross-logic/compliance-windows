@@ -209,6 +209,36 @@
             cmd: "{{ target_scc_dir }}\\cscc.exe --enableAll"
             chdir: "{{ target_scc_dir }}"
 
+        - name: List installed benchmarks
+          ansible.windows.win_command:
+            cmd: "{{ target_scc_dir }}\\cscc.exe --listAllBenchmarks"
+            chdir: "{{ target_scc_dir }}"
+          register: _benchmarks
+          changed_when: false
+
+        - name: Show installed benchmarks
+          ansible.builtin.debug:
+            msg: "{{ _benchmarks.stdout }}"
+
+        - name: Set all Windows Server benchmarks as applicable to all targets
+          ansible.windows.win_powershell:
+            script: |
+              $benchmarks = & "{{ target_scc_dir }}\cscc.exe" --listAllBenchmarks 2>&1
+              $wsIds = ($benchmarks | Select-String 'Windows_Server' |
+                ForEach-Object { ($_ -split '\s+')[0] }) -join ','
+              foreach ($id in ($wsIds -split ',')) {
+                  if ($id) {
+                      & "{{ target_scc_dir }}\cscc.exe" --applicableToAll $id 2>&1
+                  }
+              }
+              "Applied applicableToAll to: $wsIds"
+            chdir: "{{ target_scc_dir }}"
+          register: _applicable
+
+        - name: Show applicableToAll result
+          ansible.builtin.debug:
+            msg: "{{ (_applicable.output | default([''])) | join('') }}"
+
         - name: Remove staging directory
           ansible.windows.win_file:
             path: "{{ target_scc_dir }}\\scap-staging"
