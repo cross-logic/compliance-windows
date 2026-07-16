@@ -9,9 +9,9 @@
 # Both plays run in the same container, so fetched files are available to the
 # normalize step without cross-container file sharing.
 #
-# PowerSTIG is a PowerShell module installed on the Windows TARGET, not in the EE.
-# Targets must have PowerSTIG pre-installed (Install-Module -Name PowerSTIG -Force).
+# PowerSTIG is installed ephemerally on the Windows TARGET at scan time (ADR-008).
 # DSC (Desired State Configuration) is built into Windows Server 2012 R2+.
+# No DSC certificate or LCM configuration is needed — PowerSTIG runs as SYSTEM.
 #
 # This is the recommended default scanner. For SCAP 1.3 certified scanning,
 # use run_scc.yml instead (see docs/scanner-selection-guide.md).
@@ -89,67 +89,51 @@
           register: _win_temp
           changed_when: false
 
-        # Step 1: Create ephemeral DSC encryption certificate + configure LCM
-        - name: "DSC Step 1: Create encryption cert and configure LCM"
+        # Step 1: Reset LCM to clean state (no cert, no pull server)
+        # PowerSTIG runs as SYSTEM and needs no credential encryption.
+        # Stale MetaConfig.mof from previous DSC runs (Azure, EC2 launch,
+        # prior failed scans) causes "Could not find mandatory property
+        # Thumbprint" errors. Disable the LCM and clear all stale state.
+        - name: "DSC Step 1: Reset LCM to clean disabled state"
           ansible.windows.win_powershell:
             error_action: stop
             script: |
-              $certSubject = 'CN=DscEncryptionCert'
-              $cert = Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Subject -eq $certSubject -and $_.NotAfter -gt (Get-Date).AddHours(1) } |
-                  Select-Object -First 1
-              $createdCert = $false
-              if (-not $cert) {
-                  $cert = New-SelfSignedCertificate -Type DocumentEncryptionCertLegacyCsp `
-                      -DnsName 'DscEncryptionCert' -HashAlgorithm SHA256 `
-                      -CertStoreLocation 'Cert:\LocalMachine\My'
-                  $createdCert = $true
-              }
-              $pubPath = Join-Path $env:TEMP 'DscPubKey.cer'
-              Export-Certificate -Cert $cert -FilePath $pubPath -Force | Out-Null
+              Stop-DscConfiguration -Force -ErrorAction SilentlyContinue
+              Remove-DscConfigurationDocument -Stage Current, Pending, Previous -Force -ErrorAction SilentlyContinue
 
               [DSCLocalConfigurationManager()]
-              configuration LCMConfig {
+              configuration ResetLCM {
                   Node 'localhost' {
                       Settings {
-                          RefreshMode = 'Push'
-                          ConfigurationMode = 'ApplyAndMonitor'
-                          ConfigurationModeFrequencyMins = 15
-                          CertificateID = $cert.Thumbprint
+                          RefreshMode = 'Disabled'
                       }
                   }
               }
-              $lcmDir = Join-Path $env:TEMP 'LCMConfig'
-              LCMConfig -OutputPath $lcmDir | Out-Null
+              $lcmDir = Join-Path $env:TEMP 'ResetLCM'
+              ResetLCM -OutputPath $lcmDir | Out-Null
               Set-DscLocalConfigurationManager -Path $lcmDir -Force
               Remove-Item $lcmDir -Recurse -Force -ErrorAction SilentlyContinue
 
+              $lcm = Get-DscLocalConfigurationManager
               @{
-                  Thumbprint = $cert.Thumbprint
-                  CertFile = $pubPath
-                  CreatedCert = $createdCert
+                  RefreshMode = $lcm.RefreshMode
+                  CertificateID = $lcm.CertificateID
               } | ConvertTo-Json -Compress
-          register: _dsc_cert
+          register: _lcm_reset
           changed_when: false
 
-        - name: Parse cert info
-          ansible.builtin.set_fact:
-            _cert_info: "{{ (_dsc_cert.output | join('')) | from_json }}"
-
-        - name: Report LCM configuration
+        - name: Report LCM state
           ansible.builtin.debug:
-            msg: "LCM configured with CertificateID={{ _cert_info.Thumbprint }} (created={{ _cert_info.CreatedCert }})"
+            msg: "LCM reset: {{ (_lcm_reset.output | join('')) }}"
 
-        # Step 2: Compile PowerSTIG MOF
+        # Step 2: Compile PowerSTIG MOF (no certificate — DSC runs as SYSTEM)
         - name: "DSC Step 2: Compile PowerSTIG MOF"
           ansible.windows.win_powershell:
             error_action: stop
             parameters:
               StigVersion: "{{ _stig_version }}"
-              CertFile: "{{ _cert_info.CertFile }}"
-              CertThumbprint: "{{ _cert_info.Thumbprint }}"
             script: |
-              param([string]$StigVersion, [string]$CertFile, [string]$CertThumbprint)
+              param([string]$StigVersion)
               Import-Module PowerSTIG
 
               $osCaption = (Get-CimInstance Win32_OperatingSystem).Caption
@@ -172,8 +156,6 @@
               $ConfigurationData = @{
                   AllNodes = @(@{
                       NodeName = 'localhost'
-                      CertificateFile = $CertFile
-                      Thumbprint = $CertThumbprint
                       PSDscAllowPlainTextPassword = $true
                       PSDscAllowDomainUser = $true
                   })
@@ -205,6 +187,9 @@
               $mofDir = Join-Path $env:TEMP "StigMof-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
               ComplianceAudit -ConfigurationData $ConfigurationData -OutputPath $mofDir | Out-Null
 
+              # Delete meta.mof — PowerSTIG needs no LCM meta-configuration
+              Remove-Item "$mofDir\*.meta.mof" -Force -ErrorAction SilentlyContinue
+
               $mofFile = Get-ChildItem $mofDir -Filter '*.mof' |
                   Where-Object { $_.Name -notlike '*.meta.mof' } |
                   Select-Object -First 1 -ExpandProperty FullName
@@ -228,52 +213,9 @@
           ansible.builtin.debug:
             msg: "MOF compiled: {{ _mof_info.MofFile }} (OS={{ _mof_info.OsVersion }}, standalone={{ _mof_info.IsStandalone }})"
 
-        # Diagnostic: inspect compiled MOF for Thumbprint references
-        - name: "DSC Diagnostic: Inspect MOF for Thumbprint resources"
-          ansible.windows.win_powershell:
-            parameters:
-              MofFile: "{{ _mof_info.MofFile }}"
-            script: |
-              param([string]$MofFile)
-              $content = Get-Content $MofFile -Raw
-              # Find all instance blocks that contain Thumbprint
-              $pattern = 'instance of (\S+).*?\{[^}]*Thumbprint[^}]*\}'
-              $matches = [regex]::Matches($content, $pattern, 'Singleline')
-              $results = @()
-              foreach ($m in $matches) {
-                  $resourceType = $m.Groups[1].Value
-                  $block = $m.Value.Substring(0, [Math]::Min(200, $m.Value.Length))
-                  $results += @{ ResourceType = $resourceType; Preview = $block }
-              }
-              @{
-                  TotalMofLength = $content.Length
-                  ThumbprintResources = $results
-                  Count = $results.Count
-              } | ConvertTo-Json -Depth 5 -Compress
-          register: _mof_diagnostic
-          changed_when: false
-
-        - name: Report MOF Thumbprint resources
-          ansible.builtin.debug:
-            msg: "{{ (_mof_diagnostic.output | join('')) }}"
-
-        - name: "DSC Diagnostic: Verify LCM CertificateID persisted"
-          ansible.windows.win_powershell:
-            script: |
-              $lcm = Get-DscLocalConfigurationManager
-              @{
-                  CertificateID = $lcm.CertificateID
-                  RefreshMode = $lcm.RefreshMode
-                  ConfigurationMode = $lcm.ConfigurationMode
-              } | ConvertTo-Json -Compress
-          register: _lcm_check
-          changed_when: false
-
-        - name: Report LCM state
-          ansible.builtin.debug:
-            msg: "{{ (_lcm_check.output | join('')) }}"
-
-        # Step 3: Run Test-DscConfiguration (audit-only)
+        # Step 3: Audit compliance with Test-DscConfiguration -ReferenceConfiguration
+        # This tests the target's CURRENT state against the compiled MOF
+        # WITHOUT applying or modifying anything (pure audit, not enforcement).
         - name: "DSC Step 3: Test compliance (audit-only)"
           ansible.windows.win_powershell:
             error_action: stop
@@ -284,14 +226,7 @@
             script: |
               param([string]$MofFile, [string]$ResultPath, [string]$IsStandalone)
 
-              # Apply the STIG configuration then test.
-              # -ReferenceConfiguration fails on WS2025 standalone hosts with
-              # Thumbprint errors from credential-adjacent MOF structures.
-              # Start-DscConfiguration applies the hardening settings, then
-              # Test -Detailed reports per-resource compliance.
-              $mofDir = Split-Path $MofFile
-              Start-DscConfiguration -Path $mofDir -Wait -Force
-              $testResult = Test-DscConfiguration -Detailed
+              $testResult = Test-DscConfiguration -ReferenceConfiguration $MofFile -Detailed
 
               $findings = [System.Collections.Generic.List[hashtable]]::new()
               if ($null -ne $testResult.ResourcesInDesiredState) {
@@ -381,16 +316,9 @@
           failed_when: false
           when: _mof_info is defined
 
-        - name: Clean up ephemeral DSC cert and PowerSTIG module
+        - name: Clean up PowerSTIG module (if ephemerally installed)
           ansible.windows.win_powershell:
             script: |
-              # Remove ephemeral encryption cert if we created it
-              $certSubject = 'CN=DscEncryptionCert'
-              Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Subject -eq $certSubject } |
-                  Remove-Item -Force -ErrorAction SilentlyContinue
-              Remove-Item "$env:TEMP\DscPubKey.cer" -Force -ErrorAction SilentlyContinue
-              # Remove PowerSTIG if we installed it
               Remove-Module -Name PowerSTIG -Force -ErrorAction SilentlyContinue
               Uninstall-Module -Name PowerSTIG -AllVersions -Force -ErrorAction SilentlyContinue
           when: _powerstig_was_installed | default(false) | bool
