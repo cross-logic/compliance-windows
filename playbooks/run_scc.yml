@@ -157,6 +157,7 @@
 
   vars:
     cscc_exe_dir: "{{ hostvars['localhost']['cscc_exe_dir'] }}"
+    scap_content_ee_dir: /usr/share/scap/windows
     target_results_dir: 'C:\Temp\compliance-scan'
     target_scc_dir: 'C:\Temp\compliance-scc'
 
