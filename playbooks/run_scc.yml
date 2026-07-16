@@ -144,10 +144,10 @@
       ansible.builtin.set_fact:
         cscc_exe_dir: "{{ (_cscc_exe_files.files | first).path | dirname }}"
 
-    # Inject SCAP benchmark content from EE into SCC's content directory
-    # SCC manages content internally — we place benchmark ZIPs in its
-    # Resources/Content/ directory. CPE auto-selects the right benchmark
-    # per host OS version (WS2016, WS2019, WS2022, WS2025).
+    # Install SCAP benchmark content into SCC via --installScap CLI
+    # SCC manages content internally. The --installScap flag installs
+    # content from a ZIP and selects the specified profile.
+    # CPE auto-selects the correct benchmark per host OS version at scan time.
     - name: Find SCAP benchmark ZIPs in EE
       ansible.builtin.find:
         paths: "{{ scap_content_ee_dir }}"
@@ -155,21 +155,37 @@
       register: _scap_zips
       failed_when: false
 
-    - name: Copy SCAP benchmarks into SCC content directory
-      ansible.builtin.copy:
-        src: "{{ item.path }}"
-        dest: "{{ cscc_exe_dir }}/Resources/Content/"
-        mode: '0644'
+    - name: Install SCAP benchmarks into SCC
+      ansible.builtin.command:
+        cmd: >-
+          {{ cscc_exe_dir }}/cscc.exe
+          --installScap {{ item.path }} MAC-3_Sensitive --force
+        chdir: "{{ cscc_exe_dir }}"
       loop: "{{ _scap_zips.files | default([]) }}"
       loop_control:
         label: "{{ item.path | basename }}"
       when: _scap_zips.files | default([]) | length > 0
+      changed_when: true
 
-    - name: Report SCC location
+    - name: Enable all installed benchmarks
+      ansible.builtin.command:
+        cmd: "{{ cscc_exe_dir }}/cscc.exe --enableAll"
+        chdir: "{{ cscc_exe_dir }}"
+      changed_when: true
+
+    - name: List installed benchmarks
+      ansible.builtin.command:
+        cmd: "{{ cscc_exe_dir }}/cscc.exe --listAllBenchmarks"
+        chdir: "{{ cscc_exe_dir }}"
+      register: _benchmarks
+      changed_when: false
+
+    - name: Report SCC readiness
       ansible.builtin.debug:
         msg: >-
           SCC ready at {{ cscc_exe_dir }}/cscc.exe
-          ({{ (_scap_zips.files | default([])) | length }} SCAP benchmarks injected)
+          ({{ (_scap_zips.files | default([])) | length }} SCAP benchmarks installed).
+          Benchmarks: {{ _benchmarks.stdout_lines | default([]) | length }} total
 
 
 # ── Play 1: Scan Windows targets via WinRM ─────────────────────────────
@@ -216,6 +232,7 @@
             cmd: >-
               {{ target_scc_dir }}\cscc.exe
               -u {{ target_results_dir }}
+              --doNotSaveChanges
               --setOpt dirAllSessionsEnabled 0
               --setOpt dirContentTypeEnabled 0
               --setOpt dirSessionEnabled 0
@@ -223,6 +240,7 @@
               --setOpt dirStreamNameEnabled 0
               --setOpt dirTargetNameEnabled 0
               --setOpt dirXMLEnabled 0
+              --setOpt saveResultsForNotApplicableContent 0
             chdir: "{{ target_scc_dir }}"
           register: _scan_result
           failed_when: _scan_result.rc > 1
