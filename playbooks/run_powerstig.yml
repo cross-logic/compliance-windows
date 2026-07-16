@@ -34,7 +34,7 @@
 
   vars:
     fetch_dest_dir: /tmp/compliance-results
-    _stig_version: "{{ compliance_stig_version | default('2.1') }}"
+    _stig_version: "{{ compliance_stig_version | default('') }}"
     _scan_id: "{{ scan_id | default(ansible_date_time.iso8601_basic_short) }}"
 
   tasks:
@@ -120,6 +120,12 @@
                   # a Configuration{} block, NOT called as a function. Invoke-Expression
                   # with a here-string injects variable values at definition time to avoid
                   # $using: scope issues in win_powershell.
+                  # Build the Configuration block dynamically — StigVersion is optional
+                  # (when omitted, PowerSTIG uses the latest available for the OS)
+                  $stigVersionLine = if ($StigVersion) {
+                      "            StigVersion = '$StigVersion'"
+                  } else { "" }
+
                   $configScript = @"
               configuration ComplianceAudit {
                   param([string]`$NodeName = 'localhost')
@@ -128,7 +134,7 @@
                       WindowsServer BaseLine {
                           OsVersion   = '$osVer'
                           OsRole      = 'MS'
-                          StigVersion = '$StigVersion'
+              $stigVersionLine
                           DomainName  = '$domainName'
                           ForestName  = '$forestName'
                       }
