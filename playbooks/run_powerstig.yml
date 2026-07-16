@@ -127,6 +127,18 @@
                       "            StigVersion = '$StigVersion'"
                   } else { "" }
 
+                  # Allow plaintext credentials in MOF (required when LCM has no
+                  # certificate configured — common on standalone/EC2 hosts)
+                  $ConfigurationData = @{
+                      AllNodes = @(
+                          @{
+                              NodeName = 'localhost'
+                              PSDscAllowPlainTextPassword = $true
+                              PSDscAllowDomainUser = $true
+                          }
+                      )
+                  }
+
                   $configScript = @"
               configuration ComplianceAudit {
                   param([string]`$NodeName = 'localhost')
@@ -143,7 +155,7 @@
               }
               "@
                   Invoke-Expression $configScript
-                  ComplianceAudit -OutputPath $mofPath | Out-Null
+                  ComplianceAudit -ConfigurationData $ConfigurationData -OutputPath $mofPath | Out-Null
 
                   # Stage the MOF without applying (audit-only, no changes to the host).
                   # -Detailed and -Path are mutually exclusive parameter sets, so we
