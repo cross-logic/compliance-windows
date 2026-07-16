@@ -157,6 +157,25 @@
                   Invoke-Expression $configScript
                   ComplianceAudit -ConfigurationData $ConfigurationData -OutputPath $mofPath | Out-Null
 
+                  # Configure LCM to accept unsigned MOFs (required for audit-only testing
+                  # on hosts without DSC certificate infrastructure)
+                  $lcmConfig = @"
+              [DSCLocalConfigurationManager()]
+              configuration LCMConfig {
+                  Node 'localhost' {
+                      Settings {
+                          RefreshMode = 'Push'
+                          ConfigurationModeFrequencyMins = 15
+                          ConfigurationMode = 'ApplyAndMonitor'
+                      }
+                  }
+              }
+              "@
+                  Invoke-Expression $lcmConfig
+                  LCMConfig -OutputPath "$env:TEMP\LCMConfig" | Out-Null
+                  Set-DscLocalConfigurationManager -Path "$env:TEMP\LCMConfig" -Force
+                  Remove-Item -Path "$env:TEMP\LCMConfig" -Recurse -Force -ErrorAction SilentlyContinue
+
                   # Stage the MOF without applying (audit-only, no changes to the host).
                   # -Detailed and -Path are mutually exclusive parameter sets, so we
                   # publish first, then test the staged config with -Detailed.
