@@ -253,6 +253,47 @@
             recurse: true
           register: _result_files_target
 
+        - name: "Debug: Search for XCCDF results if not found in expected path"
+          ansible.windows.win_powershell:
+            script: |
+              $paths = @(
+                "{{ target_results_dir }}",
+                "{{ target_scc_dir }}\Sessions",
+                "$env:USERPROFILE\SCC",
+                "$env:LOCALAPPDATA\SCC",
+                "$env:TEMP\SCC"
+              )
+              $found = @()
+              foreach ($p in $paths) {
+                  if (Test-Path $p) {
+                      $files = Get-ChildItem $p -Recurse -Filter '*XCCDF*' -ErrorAction SilentlyContinue
+                      foreach ($f in $files) {
+                          $found += @{ Path = $f.FullName; Size = $f.Length }
+                      }
+                  }
+              }
+              if ($found.Count -eq 0) {
+                  $recentXml = Get-ChildItem C:\ -Recurse -Filter '*XCCDF*.xml' -ErrorAction SilentlyContinue |
+                      Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-15) } |
+                      Select-Object -First 10
+                  foreach ($f in $recentXml) {
+                      $found += @{ Path = $f.FullName; Size = $f.Length; Note = 'found via C:\ search' }
+                  }
+              }
+              @{
+                  FoundCount = $found.Count
+                  Files = @($found | Select-Object -First 20)
+                  UserProfile = $env:USERPROFILE
+                  ResultsDirContents = @(Get-ChildItem "{{ target_results_dir }}" -Recurse -ErrorAction SilentlyContinue | Select Name, Length, FullName | Select -First 20)
+              } | ConvertTo-Json -Depth 5
+          register: _xccdf_search
+          when: _result_files_target.files | length == 0
+
+        - name: Show XCCDF search results
+          ansible.builtin.debug:
+            msg: "{{ (_xccdf_search.output | default(['{}']) | join('')) }}"
+          when: _xccdf_search is defined and _xccdf_search is not skipped
+
         - name: Fail if no XCCDF results found
           ansible.builtin.fail:
             msg: >-
