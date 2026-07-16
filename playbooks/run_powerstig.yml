@@ -226,7 +226,7 @@
             script: |
               param([string]$MofFile, [string]$ResultPath, [string]$IsStandalone)
 
-              $testResult = Test-DscConfiguration -ReferenceConfiguration $MofFile -Detailed
+              $testResult = Test-DscConfiguration -ReferenceConfiguration $MofFile
 
               $findings = [System.Collections.Generic.List[hashtable]]::new()
               if ($null -ne $testResult.ResourcesInDesiredState) {
