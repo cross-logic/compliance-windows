@@ -239,7 +239,14 @@
             script: |
               param([string]$MofFile, [string]$ResultPath, [string]$IsStandalone)
 
-              $testResult = Test-DscConfiguration -ReferenceConfiguration $MofFile
+              # Apply the STIG configuration then test.
+              # -ReferenceConfiguration fails on WS2025 standalone hosts with
+              # Thumbprint errors from credential-adjacent MOF structures.
+              # Start-DscConfiguration applies the hardening settings, then
+              # Test -Detailed reports per-resource compliance.
+              $mofDir = Split-Path $MofFile
+              Start-DscConfiguration -Path $mofDir -Wait -Force
+              $testResult = Test-DscConfiguration -Detailed
 
               $findings = [System.Collections.Generic.List[hashtable]]::new()
               if ($null -ne $testResult.ResourcesInDesiredState) {
