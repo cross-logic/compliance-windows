@@ -253,6 +253,33 @@
             recurse: true
           register: _result_files_target
 
+        - name: "Debug: Show SCC scan stdout/stderr"
+          ansible.builtin.debug:
+            msg: |
+              RC: {{ _scan_result.rc | default('?') }}
+              STDOUT: {{ _scan_result.stdout | default('(empty)') }}
+              STDERR: {{ _scan_result.stderr | default('(empty)') }}
+          when: _result_files_target.files | length == 0
+
+        - name: "Debug: Read SCC error log if it exists"
+          ansible.windows.win_powershell:
+            script: |
+              $logDir = "{{ target_results_dir }}\Logs"
+              if (Test-Path $logDir) {
+                  $logs = Get-ChildItem $logDir -Filter '*Error*' -Recurse
+                  foreach ($log in $logs) {
+                      "=== $($log.Name) ==="
+                      Get-Content $log.FullName -Raw | Select-Object -First 1
+                  }
+              } else { "No Logs directory" }
+          register: _scc_error_log
+          when: _result_files_target.files | length == 0
+
+        - name: Show SCC error log
+          ansible.builtin.debug:
+            msg: "{{ (_scc_error_log.output | default(['no log'])) | join('\n') }}"
+          when: _scc_error_log is defined and _scc_error_log is not skipped
+
         - name: "Debug: Search for XCCDF results if not found in expected path"
           ansible.windows.win_powershell:
             script: |
