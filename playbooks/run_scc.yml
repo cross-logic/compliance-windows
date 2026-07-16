@@ -144,48 +144,9 @@
       ansible.builtin.set_fact:
         cscc_exe_dir: "{{ (_cscc_exe_files.files | first).path | dirname }}"
 
-    # Install SCAP benchmark content into SCC via --installScap CLI
-    # SCC manages content internally. The --installScap flag installs
-    # content from a ZIP and selects the specified profile.
-    # CPE auto-selects the correct benchmark per host OS version at scan time.
-    - name: Find SCAP benchmark ZIPs in EE
-      ansible.builtin.find:
-        paths: "{{ scap_content_ee_dir }}"
-        patterns: "*.zip"
-      register: _scap_zips
-      failed_when: false
-
-    - name: Install SCAP benchmarks into SCC
-      ansible.builtin.command:
-        cmd: >-
-          {{ cscc_exe_dir }}/cscc.exe
-          --installScap {{ item.path }} MAC-3_Sensitive --force
-        chdir: "{{ cscc_exe_dir }}"
-      loop: "{{ _scap_zips.files | default([]) }}"
-      loop_control:
-        label: "{{ item.path | basename }}"
-      when: _scap_zips.files | default([]) | length > 0
-      changed_when: true
-
-    - name: Enable all installed benchmarks
-      ansible.builtin.command:
-        cmd: "{{ cscc_exe_dir }}/cscc.exe --enableAll"
-        chdir: "{{ cscc_exe_dir }}"
-      changed_when: true
-
-    - name: List installed benchmarks
-      ansible.builtin.command:
-        cmd: "{{ cscc_exe_dir }}/cscc.exe --listAllBenchmarks"
-        chdir: "{{ cscc_exe_dir }}"
-      register: _benchmarks
-      changed_when: false
-
-    - name: Report SCC readiness
+    - name: Report SCC location
       ansible.builtin.debug:
-        msg: >-
-          SCC ready at {{ cscc_exe_dir }}/cscc.exe
-          ({{ (_scap_zips.files | default([])) | length }} SCAP benchmarks installed).
-          Benchmarks: {{ _benchmarks.stdout_lines | default([]) | length }} total
+        msg: "SCC ready at {{ cscc_exe_dir }}/cscc.exe"
 
 
 # ── Play 1: Scan Windows targets via WinRM ─────────────────────────────
@@ -211,10 +172,46 @@
             path: "{{ target_scc_dir }}"
             state: directory
 
-        - name: Copy SCC (with injected SCAP content) to target
+        - name: Copy SCC to target
           ansible.windows.win_copy:
             src: "{{ cscc_exe_dir }}/"
             dest: "{{ target_scc_dir }}"
+
+        # ── Install SCAP benchmarks into SCC on target ────────────────
+        # Copy benchmark ZIPs from EE, install via --installScap CLI,
+        # enable all content. CPE auto-selects per host OS at scan time.
+        - name: Copy SCAP benchmark ZIPs to target
+          ansible.windows.win_copy:
+            src: "{{ scap_content_ee_dir }}/"
+            dest: "{{ target_scc_dir }}\\scap-staging"
+
+        - name: Find benchmark ZIPs on target
+          ansible.windows.win_find:
+            paths: "{{ target_scc_dir }}\\scap-staging"
+            patterns: "*.zip"
+          register: _target_benchmarks
+
+        - name: Install each SCAP benchmark into SCC
+          ansible.windows.win_command:
+            cmd: >-
+              {{ target_scc_dir }}\cscc.exe
+              --installScap {{ item.path }} MAC-3_Sensitive --force
+            chdir: "{{ target_scc_dir }}"
+          loop: "{{ _target_benchmarks.files | default([]) }}"
+          loop_control:
+            label: "{{ item.path | ansible.windows.win_basename | default(item.path | basename) }}"
+          when: _target_benchmarks.files | default([]) | length > 0
+          register: _install_results
+
+        - name: Enable all installed benchmarks
+          ansible.windows.win_command:
+            cmd: "{{ target_scc_dir }}\\cscc.exe --enableAll"
+            chdir: "{{ target_scc_dir }}"
+
+        - name: Remove staging directory
+          ansible.windows.win_file:
+            path: "{{ target_scc_dir }}\\scap-staging"
+            state: absent
 
         # ── Run SCC scan ──────────────────────────────────────────────
         # SCC CLI reference:
