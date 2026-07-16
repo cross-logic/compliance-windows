@@ -91,6 +91,7 @@
 
         - name: Run PowerSTIG DSC compliance scan (audit-only)
           ansible.windows.win_powershell:
+            error_action: stop
             parameters:
               StigVersion: "{{ _stig_version }}"
               ResultPath: "{{ (_win_temp.output | first | trim) }}\\compliance-dsc-result.json"
@@ -144,7 +145,12 @@
                   Invoke-Expression $configScript
                   ComplianceAudit -OutputPath $mofPath | Out-Null
 
-                  $testResult = Test-DscConfiguration -Path $mofPath -Detailed
+                  # Find the compiled MOF file (named after the target node)
+                  $mofFile = Get-ChildItem -Path $mofPath -Filter "*.mof" |
+                      Where-Object { $_.Name -ne "localhost.meta.mof" } |
+                      Select-Object -First 1
+                  if (-not $mofFile) { throw "No MOF file generated in $mofPath" }
+                  $testResult = Test-DscConfiguration -ReferenceConfiguration $mofFile.FullName -Detailed
 
                   $findings = @()
                   foreach ($resource in $testResult.ResourcesInDesiredState) {
