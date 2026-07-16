@@ -200,7 +200,7 @@
             chdir: "{{ target_scc_dir }}"
           loop: "{{ _target_benchmarks.files | default([]) }}"
           loop_control:
-            label: "{{ item.path | ansible.windows.win_basename | default(item.path | basename) }}"
+            label: "{{ item.path | regex_replace('.*[/\\\\]', '') }}"
           when: _target_benchmarks.files | default([]) | length > 0
           register: _install_results
 
@@ -276,7 +276,7 @@
             flat: true
           loop: "{{ _result_files_target.files }}"
           loop_control:
-            label: "{{ item.path | win_basename | default(item.path | basename) }}"
+            label: "{{ item.path | regex_replace('.*[/\\\\]', '') }}"
             extended: true
 
       always:
