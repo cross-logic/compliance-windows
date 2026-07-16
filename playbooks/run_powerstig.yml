@@ -298,8 +298,9 @@
 
                   if ($null -ne $testResult.ResourcesInDesiredState) {
                       foreach ($r in $testResult.ResourcesInDesiredState) {
+                          $rid = $r.ResourceId -replace '.*\[(.+?)\].*','$1'
                           $findings.Add(@{
-                              RuleId         = $r.ResourceId -replace '.*\[(.+?)\].*', '$1'
+                              RuleId         = $rid
                               Status         = 'Compliant'
                               ResourceName   = $r.ResourceId
                               InDesiredState = $true
@@ -309,8 +310,9 @@
 
                   if ($null -ne $testResult.ResourcesNotInDesiredState) {
                       foreach ($r in $testResult.ResourcesNotInDesiredState) {
+                          $rid = $r.ResourceId -replace '.*\[(.+?)\].*','$1'
                           $findings.Add(@{
-                              RuleId         = $r.ResourceId -replace '.*\[(.+?)\].*', '$1'
+                              RuleId         = $rid
                               Status         = 'NonCompliant'
                               ResourceName   = $r.ResourceId
                               InDesiredState = $false
