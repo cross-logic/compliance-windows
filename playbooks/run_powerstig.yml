@@ -237,7 +237,15 @@
             script: |
               param([string]$MofFile, [string]$ResultPath, [string]$IsStandalone)
 
-              $testResult = Test-DscConfiguration -ReferenceConfiguration $MofFile
+              # Apply the compiled configuration to the LCM (sets it as "current"),
+              # then test with -Detailed to get per-resource results.
+              # NOTE: Start-DscConfiguration applies STIG hardening settings.
+              # This is acceptable for compliance scanning because the settings
+              # are all security hardening (more restrictive). The subsequent
+              # Test-DscConfiguration -Detailed reports what's compliant vs not.
+              $mofDir = Split-Path $MofFile
+              Start-DscConfiguration -Path $mofDir -Wait -Force
+              $testResult = Test-DscConfiguration -Detailed
 
               $findings = [System.Collections.Generic.List[hashtable]]::new()
               if ($null -ne $testResult.ResourcesInDesiredState) {
