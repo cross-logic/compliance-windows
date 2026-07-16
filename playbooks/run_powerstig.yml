@@ -257,6 +257,22 @@
           ansible.builtin.debug:
             msg: "{{ (_mof_diagnostic.output | join('')) }}"
 
+        - name: "DSC Diagnostic: Verify LCM CertificateID persisted"
+          ansible.windows.win_powershell:
+            script: |
+              $lcm = Get-DscLocalConfigurationManager
+              @{
+                  CertificateID = $lcm.CertificateID
+                  RefreshMode = $lcm.RefreshMode
+                  ConfigurationMode = $lcm.ConfigurationMode
+              } | ConvertTo-Json -Compress
+          register: _lcm_check
+          changed_when: false
+
+        - name: Report LCM state
+          ansible.builtin.debug:
+            msg: "{{ (_lcm_check.output | join('')) }}"
+
         # Step 3: Run Test-DscConfiguration (audit-only)
         - name: "DSC Step 3: Test compliance (audit-only)"
           ansible.windows.win_powershell:
