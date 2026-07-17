@@ -115,15 +115,16 @@ SCC supports loading ALL Windows Server benchmarks (WS2016–2025) simultaneousl
 The SCAP standard's **CPE (Common Platform Enumeration)** mechanism handles
 per-host version matching automatically — no Ansible-side OS detection needed.
 
-> **[Updated Jul 17]** The pipeline no longer uses `--enableAll` with CPE
-> auto-selection. Instead, it uses **selective benchmark enablement per host
-> OS version** (`--disableAll` then `--enableBenchmark <id>` for matches).
-> The `_benchmark_match` variable scopes each host to its own OS version
-> (e.g., WS2019 host enables only `*_2019_*` benchmarks), reducing scan
-> time from ~38 min to ~5 min per host by avoiding evaluation of all 35
-> bundled benchmarks. CPE auto-selection remains the fallback correctness
-> guarantee but selective enablement is the primary mechanism. See
-> "Validated Deployment Architecture" below for the updated flow.
+> **[Updated Jul 17]** Selective enablement (`--disableAll` + `--enableBenchmark`)
+> was attempted but **does not work reliably** — SCC returns RC=0 but produces
+> zero XCCDF results despite benchmarks appearing enabled. The flags are valid
+> CLI commands (confirmed via `--help`) and return RC=0, but the enable/disable
+> state does not persist across separate `cscc.exe` invocations. Each CLI call
+> is a standalone process that loads options.xml, modifies in-memory state,
+> and may not flush changes. The pipeline uses `--enableAll` + CPE filtering
+> (the proven working approach from job 4375). CPE auto-selects matching
+> benchmarks per host OS. For WS2025, `ignoreCPEOVALResults=1` forces
+> WS2022 benchmarks to evaluate.
 
 ### How it works
 
@@ -219,14 +220,12 @@ Scan Time (ephemeral, per-target):
     3. Copy SCC from EE (or scc_share_path network share) to target
     4. Copy only the SCAP benchmark matching host OS via _benchmark_match
     5. Install benchmark: cscc --installScap <zip> MAC-3_Sensitive --force
-    6. Disable all: cscc --disableAll
-    7. Enable only matching benchmarks: cscc --enableBenchmark <id>
-       (IDs parsed from --listAllBenchmarks, filtered by _benchmark_match)
-    8. WS2025 only: cscc --setOpt ignoreCPEOVALResults 1 (CPE override)
-    9. Scan: cscc -u <results_dir> --setOpt dirXxxEnabled 0 (×7 for flat output)
-    10. Find + fetch *XCCDF*.xml results back to EE
-    11. On zero results: warn + end_host (skip host, continue others)
-    12. Cleanup (always): remove SCC + results from target
+    6. Enable all: cscc --enableAll (CPE auto-selects matching benchmarks)
+    7. WS2025 only: cscc --setOpt ignoreCPEOVALResults 1 (CPE override)
+    8. Scan: cscc -u <results_dir> --setOpt dirXxxEnabled 0 (×7 for flat output)
+    9. Find + fetch *XCCDF*.xml results back to EE
+    10. On zero results: warn + end_host (skip host, continue others)
+    11. Cleanup (always): remove SCC + results from target
     On failure (timeout/WinRM): rescue block logs warning, end_host
 
   Play 2 (EE/localhost):
@@ -262,11 +261,11 @@ Scan Time (ephemeral, per-target):
 2. **`--enableAll` does NOT set `enabled="1"`** in options.xml. SCC uses a
    different internal representation. The XML `allEnabledCount=0` in our
    diagnostic was misleading — content IS enabled, just not via that attribute.
-   **[Updated Jul 17]** `--enableAll` is no longer used in the pipeline.
-   Replaced by `--disableAll` + selective `--enableBenchmark <id>` for
-   per-host OS scoping. Benchmark IDs are parsed from `--listAllBenchmarks`
-   output using `regex_replace` (not `regex_search`, which returns lists
-   in Ansible's Jinja2).
+   **[Updated Jul 17]** `--enableAll` remains the pipeline default.
+   Selective `--disableAll` + `--enableBenchmark` was attempted but produces
+   zero XCCDF results (RC=0, empty output). The enable/disable state does not
+   persist across separate `cscc.exe` process invocations. CPE filtering
+   handles per-host benchmark selection reliably.
 
 3. **`ignoreCPEOVALResults=1`** is the global "Run All Content" override.
    Required for WS2025 hosts until a WS2025 SCAP benchmark exists. Without it,
@@ -305,15 +304,16 @@ Normalized: "52 hosts" (26 XCCDF files × 2 hosts).
 
 ### Optimization needed
 
-> **[Updated Jul 17]** The first optimization below is now implemented.
-> The pipeline uses `--disableAll` + selective `--enableBenchmark` to enable
-> only benchmarks matching the host's OS version. This replaced the
-> `--enableAll` approach that evaluated all 35 benchmarks per host.
+> **[Updated Jul 17]** Selective enablement (`--disableAll` + `--enableBenchmark`)
+> was attempted but does NOT produce XCCDF results despite RC=0. The flags
+> execute without error but the state does not persist across invocations.
+> Pipeline reverted to `--enableAll` + CPE filtering (the proven path).
 
-- ~~**Disable non-Server benchmarks** before scan to reduce time from 38 min to ~5 min.
-  Currently all 35 benchmarks evaluate on each host. Only the ~8 Windows Server
-  benchmarks are needed. Use `cscc --disableBenchmark <id>` for IE/Chrome/IIS/etc.~~
-  **DONE** — implemented via `--disableAll` + per-host `--enableBenchmark`.
+- **Disable non-Server benchmarks** — `--disableAll` + `--enableBenchmark` was
+  implemented and tested across 6 lab runs (jobs 4380–4389) but consistently
+  produces zero XCCDF results. SCC's enable/disable state does not persist across
+  separate `cscc.exe` process invocations. Future approach: investigate
+  `--setOpt` directives or options.xml manipulation to disable specific streams.
 - **Check if content already installed** before `--installScap` to skip on re-scans
   of the same target (saves ~30s per host per benchmark).
 
