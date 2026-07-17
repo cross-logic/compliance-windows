@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `playbooks/gather_facts.yml` — gather compliance data from Windows hosts
   - `playbooks/evaluate.yml` — evaluate gathered facts against rule definitions
   - `playbooks/remediate.yml` — apply STIG remediation via windows_ops or PowerSTIG DSC
-  - `playbooks/scan.yml` — run PowerSTIG compliance scan
+  - `playbooks/run_scc.yml` — run DISA SCC STIG compliance scan (default)
+  - `playbooks/run_powerstig.yml` — run PowerSTIG DSC compliance scan (domain-joined)
   - `playbooks/normalize.yml` — convert raw results to CFF
 
 - **EE Profile**
@@ -52,14 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Gap controls flagged with notes for requirements without direct technical mappings
 
 - **Playbooks**
-  - `scan-windows-cis.yml` — audit-only CIS benchmark scan with CFF output
-  - `scan-windows-stig.yml` — audit-only DISA STIG scan with CFF output
-  - `scan-windows-hipaa.yml` — CIS scan with HIPAA crosswalk mapping
-  - `scan-windows-pci.yml` — CIS scan with PCI-DSS v4.0 crosswalk mapping
+  - `run_scc.yml` — DISA SCC STIG scan with per-host OS benchmark selection (default)
+  - `run_powerstig.yml` — PowerSTIG DSC STIG scan (domain-joined hosts only)
   - `verify-windows-cis.yml` — post-remediation CIS verification with threshold assertion
   - `verify-windows-stig.yml` — post-remediation STIG verification with threshold assertion
   - `remediate-windows-cis.yml` — apply CIS benchmark remediation
   - `remediate-windows-stig.yml` — apply DISA STIG remediation
+  - ~~`scan-windows-stig.yml`~~ — removed, replaced by `run_scc.yml`
+  - ~~`scan-windows-cis.yml`~~ — removed (CIS scanning is future work)
+  - ~~`scan-windows-hipaa.yml`~~ — removed (crosswalks are client-side widgets per ADR-038 D4)
+  - ~~`scan-windows-pci.yml`~~ — removed (crosswalks are client-side widgets per ADR-038 D4)
 
 - **Execution Environment Patterns**
   - `compliance-windows-cis` — EE definition for CIS workflows

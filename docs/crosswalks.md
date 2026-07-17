@@ -68,10 +68,10 @@ Maps to technical requirements in:
 Run a DISA STIG or CIS scan as usual:
 
 ```bash
-ansible-playbook security.compliance_windows.scan-windows-stig -i inventory.yml
+ansible-playbook security.compliance_windows.run_scc -i inventory.yml -e scan_id=$(uuidgen)
 ```
 
-This produces CFF JSON with 366 STIG findings.
+This produces CFF JSON with STIG findings (count varies by OS version and benchmark).
 
 ### Step 2: Crosswalk Mapping
 
@@ -292,30 +292,16 @@ profile:
             crosswalk_profile: "nist_800_171"
 ```
 
-### 3. Add Crosswalk Playbook
+### 3. Register Dashboard Tab
 
-Create `playbooks/scan-windows-nist.yml`:
+Crosswalks are rendered as client-side dashboard widgets (ADR-038 D4), not
+standalone playbooks. The crosswalk tab in the Ansible Portal compliance
+plugin reads the crosswalk profile YAML and maps it against primary scan
+results at display time.
 
-```yaml
----
-- name: "Scan Windows Server NIST 800-171 compliance (crosswalk view)"
-  hosts: "{{ compliance_target_hosts | default('windows') }}"
-  gather_facts: true
-
-  tasks:
-    # Run primary STIG scan
-    - name: Run STIG scan
-      ansible.builtin.include_tasks:
-        file: scan-windows-stig.yml
-
-    # Map STIG results to NIST 800-171
-    - name: Map to NIST 800-171
-      ansible.builtin.include_role:
-        name: compliance_crosswalk
-      vars:
-        crosswalk_profile: nist_800_171
-        primary_findings: "{{ stig_cff_output }}"
-```
+> **Note**: The earlier pattern of dedicated crosswalk playbooks
+> (`scan-windows-hipaa.yml`, `scan-windows-pci.yml`) has been removed.
+> Crosswalk mapping is a client-side concern, not a scan-time operation.
 
 ### 4. Update Documentation
 

@@ -6,7 +6,7 @@
 
 Windows Server compliance profiles for DISA STIG, CIS Benchmarks, HIPAA, and PCI-DSS v4.0.
 
-DISA STIG scanning with PowerSTIG (default, DSC-based) or DISA SCC (SCAP 1.3 certified), CIS scanning via infra.windows_ops (conformant), and centralized normalization to Common Findings Format (CFF) for Ansible Portal dashboard integration.
+DISA STIG scanning with DISA SCC (default, SCAP 1.3 certified) or PowerSTIG (DSC-based, domain-joined hosts only), and centralized normalization to Common Findings Format (CFF) for Ansible Portal dashboard integration. Regulatory crosswalks (HIPAA, PCI-DSS) are rendered as client-side dashboard widgets from primary STIG/CIS scan data (ADR-038 D4).
 
 ## Table of Contents
 
@@ -62,15 +62,15 @@ The collection supports three scanner backends:
 
 | Scanner | Certification | Distribution | Use Case |
 |---------|---------------|--------------|----------|
-| **PowerSTIG** (default) | Uncertified | DSC native (built into Windows) | Daily STIG scanning, no external downloads |
-| **DISA SCC** | SCAP 1.3 Certified | Portable download from dl.dod.cyber.mil | STIG compliance audits for DoD/FedRAMP |
-| **infra.windows_ops** | Conformant (not certified) | Embedded in EE | CIS L1/L2 hardening checks |
+| **DISA SCC** (default) | SCAP 1.3 Certified | Portable download from dl.dod.cyber.mil | STIG compliance scanning for all hosts |
+| **PowerSTIG** | Uncertified | DSC native (built into Windows) | Domain-joined hosts with certificate infrastructure |
+| **infra.windows_ops** | Conformant (not certified) | Embedded in EE | CIS L1/L2 hardening checks (future) |
 
-**PowerSTIG** is the recommended default for daily operations. It uses Windows DSC (`Test-DscConfiguration`) for audit-only scanning with no external downloads. The same DSC engine handles remediation (`Start-DscConfiguration`), giving scan/remediation symmetry.
+**DISA SCC** is the default scanner. It uses selective benchmark enablement per host OS version in mixed fleets (WS2019/WS2022/WS2025), with rescue blocks for per-host timeout resilience. SCC is deployed as a portable binary (not installed) and cleaned up after each scan.
 
-**DISA SCC** is recommended when SCAP 1.3 certification is required for audit evidence. SCC is deployed as a portable binary (not installed) and cleaned up after each scan. See [docs/scanner-selection-guide.md](docs/scanner-selection-guide.md) for choosing between scanners.
+**PowerSTIG** is secondary, restricted to domain-joined hosts with Active Directory and certificate infrastructure. Standalone (non-domain) hosts fail across all Windows Server versions (2016-2025). See [docs/scanner-selection-guide.md](docs/scanner-selection-guide.md) for choosing between scanners.
 
-**infra.windows_ops** provides CIS scanning with Ansible-native task execution. Results are conformant with CIS benchmarks but not CIS-certified.
+**infra.windows_ops** provides CIS scanning with Ansible-native task execution. CIS support is future work.
 
 ## Requirements
 
@@ -83,17 +83,7 @@ The collection supports three scanner backends:
 
 ## Quick Start
 
-### Scan (STIG with PowerSTIG — recommended)
-
-```bash
-ansible-playbook security.compliance_windows.run_powerstig \
-  -i inventory.yml \
-  -e scan_id=$(uuidgen)
-```
-
-This runs a PowerSTIG DSC audit-only scan (no changes to targets).
-
-### Scan (STIG with SCC — certified)
+### Scan (STIG with SCC — default, certified)
 
 ```bash
 ansible-playbook security.compliance_windows.run_scc \
@@ -101,13 +91,17 @@ ansible-playbook security.compliance_windows.run_scc \
   -e scan_id=$(uuidgen)
 ```
 
-### Scan (CIS with infra.windows_ops)
+This runs a DISA SCC SCAP 1.3 certified scan with per-host OS benchmark selection.
+
+### Scan (STIG with PowerSTIG — domain-joined only)
 
 ```bash
-ansible-playbook security.compliance_windows.scan-windows-cis \
+ansible-playbook security.compliance_windows.run_powerstig \
   -i inventory.yml \
-  --check
+  -e scan_id=$(uuidgen)
 ```
+
+Requires Active Directory domain membership and certificate infrastructure.
 
 ### Remediate
 
@@ -129,14 +123,12 @@ ansible-playbook security.compliance_windows.verify-windows-stig \
 ```
 security.compliance_windows/
 ├── playbooks/
-│   ├── run_powerstig.yml            # DISA STIG scan with PowerSTIG (recommended)
-│   ├── run_scc.yml                  # DISA STIG scan with SCC (certified)
-│   ├── scan-windows-cis.yml         # CIS L1/L2 scan with infra.windows_ops
+│   ├── run_scc.yml                  # DISA STIG scan with SCC (default, certified)
+│   ├── run_powerstig.yml            # DISA STIG scan with PowerSTIG (domain-joined)
 │   ├── remediate-windows-stig.yml   # STIG remediation
 │   ├── remediate-windows-cis.yml    # CIS remediation
 │   ├── verify-windows-stig.yml      # Post-remediation verification
-│   ├── scan-windows-hipaa.yml       # HIPAA crosswalk view (STIG-backed)
-│   ├── scan-windows-pci.yml         # PCI-DSS crosswalk view (STIG-backed)
+│   ├── verify-windows-cis.yml       # Post-remediation CIS verification
 │   └── normalize.yml                # Standalone normalization utility
 ├── roles/
 │   ├── normalize_stig_findings/     # Transform STIG results to CFF
@@ -179,18 +171,16 @@ security.compliance_windows/
 
 | Playbook | Runs On | Description |
 |----------|---------|-------------|
-| `run_powerstig.yml` | Windows targets | DISA STIG scan with PowerSTIG DSC (recommended) |
-| `run_scc.yml` | Windows targets | DISA STIG scan with SCC (certified) |
-| `scan-windows-cis.yml` | Windows targets | CIS L1/L2 scan with infra.windows_ops + normalize to CFF |
+| `run_scc.yml` | Windows targets + EE | DISA STIG scan with SCC (default, certified). 3-play pipeline: download SCC, scan with per-host OS benchmark selection, normalize + stream results |
+| `run_powerstig.yml` | Windows targets | DISA STIG scan with PowerSTIG DSC (domain-joined hosts only) |
 | `remediate-windows-stig.yml` | Windows targets | Apply STIG controls via infra.windows_ops or PowerSTIG |
 | `remediate-windows-cis.yml` | Windows targets | Apply CIS controls via infra.windows_ops |
 | `verify-windows-stig.yml` | Windows targets | Post-remediation scan (same as scan, different context) |
 | `verify-windows-cis.yml` | Windows targets | Post-remediation CIS scan |
-| `scan-windows-hipaa.yml` | Windows targets | HIPAA crosswalk view (STIG scan + crosswalk mapping) |
-| `scan-windows-pci.yml` | Windows targets | PCI-DSS crosswalk view (STIG scan + crosswalk mapping) |
 | `normalize.yml` | Execution node | Standalone normalization utility (debugging, Tier 2 reuse) |
-| `scan.yml` | Windows targets | Generic scan dispatcher (delegates to specific profile) |
 | `remediate.yml` | Windows targets | Generic remediation dispatcher |
+
+> **Note**: `scan.yml`, `scan-windows-stig.yml`, `scan-windows-cis.yml`, `scan-windows-hipaa.yml`, and `scan-windows-pci.yml` have been removed. Use `run_scc.yml` (default) or `run_powerstig.yml` for STIG scanning. HIPAA and PCI-DSS crosswalks are client-side dashboard widgets per ADR-038 D4, not standalone playbooks.
 
 ## Filter Plugins
 
@@ -261,13 +251,13 @@ Run `install.yml` to register the profile on AAP Controller:
 export AAP_HOST=https://controller.example.com
 export AAP_API_TOKEN=<token>
 
-# PowerSTIG only (default, recommended)
+# SCC only (default, recommended)
 ansible-playbook install.yml
 
-# SCC only (for SCAP 1.3 certification)
-ansible-playbook install.yml -e scanner=scc
+# PowerSTIG only (domain-joined hosts with certificate infrastructure)
+ansible-playbook install.yml -e scanner=powerstig
 
-# Both scanners (daily PowerSTIG + audit SCC)
+# Both scanners (daily SCC + PowerSTIG for domain-joined)
 ansible-playbook install.yml -e scanner=both
 ```
 

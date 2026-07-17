@@ -115,6 +115,16 @@ SCC supports loading ALL Windows Server benchmarks (WS2016–2025) simultaneousl
 The SCAP standard's **CPE (Common Platform Enumeration)** mechanism handles
 per-host version matching automatically — no Ansible-side OS detection needed.
 
+> **[Updated Jul 17]** The pipeline no longer uses `--enableAll` with CPE
+> auto-selection. Instead, it uses **selective benchmark enablement per host
+> OS version** (`--disableAll` then `--enableBenchmark <id>` for matches).
+> The `_benchmark_match` variable scopes each host to its own OS version
+> (e.g., WS2019 host enables only `*_2019_*` benchmarks), reducing scan
+> time from ~38 min to ~5 min per host by avoiding evaluation of all 35
+> bundled benchmarks. CPE auto-selection remains the fallback correctness
+> guarantee but selective enablement is the primary mechanism. See
+> "Validated Deployment Architecture" below for the updated flow.
+
 ### How it works
 
 1. Each benchmark contains `<xccdf:platform>` elements with CPE identifiers
@@ -132,6 +142,13 @@ Applicability)" override option — its existence proves CPE filtering is
 the default behavior.
 
 ### Mixed-version inventories
+
+> **[Updated Jul 17]** The pipeline now handles mixed fleets by mapping
+> each host's OS build number to a benchmark via `_os_benchmark_map` in
+> `run_scc.yml`. The `_benchmark_match` variable (e.g., `'2019'`, `'2022'`)
+> is derived from the host's kernel build, and only benchmarks whose IDs
+> contain that match string are enabled. This replaces the earlier approach
+> of enabling all benchmarks and relying solely on CPE filtering.
 
 A single SCC deployment with all 4 benchmarks enabled can scan a mixed
 inventory (WS2019 + WS2022 + WS2025 hosts). CPE handles per-host selection.
@@ -198,19 +215,25 @@ Scan Time (ephemeral, per-target):
     1. Download SCC 5.14 portable ZIP from dl.dod.cyber.mil (cache on EE)
     2. Extract inner portable ZIP (bundle is ZIP-in-ZIP)
 
-  Play 1 (Windows targets):
-    3. Copy SCC + SCAP ZIPs from EE to target
-    4. Install benchmarks: cscc --installScap <zip> MAC-3_Sensitive --force
-    5. Enable all: cscc --enableAll
-    6. Override CPE: cscc --setOpt ignoreCPEOVALResults 1
-    7. Scan: cscc -u <results_dir> --setOpt dirXxxEnabled 0 (×7 for flat output)
-    8. Find + fetch *XCCDF*.xml results back to EE
-    9. Cleanup: remove SCC + results from target
+  Play 1 (Windows targets, with rescue block for per-host failure isolation):
+    3. Copy SCC from EE (or scc_share_path network share) to target
+    4. Copy only the SCAP benchmark matching host OS via _benchmark_match
+    5. Install benchmark: cscc --installScap <zip> MAC-3_Sensitive --force
+    6. Disable all: cscc --disableAll
+    7. Enable only matching benchmarks: cscc --enableBenchmark <id>
+       (IDs parsed from --listAllBenchmarks, filtered by _benchmark_match)
+    8. WS2025 only: cscc --setOpt ignoreCPEOVALResults 1 (CPE override)
+    9. Scan: cscc -u <results_dir> --setOpt dirXxxEnabled 0 (×7 for flat output)
+    10. Find + fetch *XCCDF*.xml results back to EE
+    11. On zero results: warn + end_host (skip host, continue others)
+    12. Cleanup (always): remove SCC + results from target
+    On failure (timeout/WinRM): rescue block logs warning, end_host
 
   Play 2 (EE/localhost):
-    10. Normalize XCCDF to CFF via normalize_xccdf module
-    11. Compose NDJSON POST body
-    12. Stream to compliance API
+    13. Soft-fail: end_play if no XCCDF files exist (all hosts failed/skipped)
+    14. Normalize XCCDF to CFF via normalize_xccdf module (per-host loop)
+    15. Compose NDJSON POST body
+    16. Stream to compliance API
 ```
 
 ### SCC CLI Reference (validated)
@@ -219,8 +242,11 @@ Scan Time (ephemeral, per-target):
 |------|---------|-------|
 | `-u <path>` | User results directory | Directory must pre-exist |
 | `--installScap <file> <profile>` | Install SCAP content from ZIP | `--force` to reinstall |
-| `--enableAll` | Enable all installed benchmarks | |
-| `--setOpt ignoreCPEOVALResults 1` | Force all benchmarks to run | Required for WS2025 (no WS2025 benchmark yet) |
+| `--enableAll` | Enable all installed benchmarks | Replaced by selective enablement (see below) |
+| `--disableAll` | Disable all benchmarks | Run before selective `--enableBenchmark` |
+| `--enableBenchmark <id>` | Enable one benchmark by ID | Used for per-host OS scoping |
+| `--disableBenchmark <id>` | Disable one benchmark by ID | Alternative to `--disableAll` |
+| `--setOpt ignoreCPEOVALResults 1` | Force all benchmarks to run | WS2025 only (no WS2025 benchmark yet) |
 | `--setOpt dirXxxEnabled 0` (×7) | Flatten result directory | See playbook for all 7 keys |
 | `--listAllBenchmarks` | List installed benchmark IDs | Use for debugging |
 | `--applicableToAll <id>` | Force one benchmark applicable | Per-benchmark, less reliable than ignoreCPE |
@@ -236,6 +262,11 @@ Scan Time (ephemeral, per-target):
 2. **`--enableAll` does NOT set `enabled="1"`** in options.xml. SCC uses a
    different internal representation. The XML `allEnabledCount=0` in our
    diagnostic was misleading — content IS enabled, just not via that attribute.
+   **[Updated Jul 17]** `--enableAll` is no longer used in the pipeline.
+   Replaced by `--disableAll` + selective `--enableBenchmark <id>` for
+   per-host OS scoping. Benchmark IDs are parsed from `--listAllBenchmarks`
+   output using `regex_replace` (not `regex_search`, which returns lists
+   in Ansible's Jinja2).
 
 3. **`ignoreCPEOVALResults=1`** is the global "Run All Content" override.
    Required for WS2025 hosts until a WS2025 SCAP benchmark exists. Without it,
@@ -248,7 +279,17 @@ Scan Time (ephemeral, per-target):
 5. **Host intermittency**: On identical configuration, 1/3 hosts may produce
    zero results (RC 0, empty output dir, no error log). Root cause unconfirmed
    — likely WinRM session timeout or SCC internal failure that returns RC 0.
-   Playbook should handle this gracefully (warn, don't fail the entire job).
+   **[Updated Jul 17]** Now handled gracefully: Play 1 uses a `rescue` block
+   to catch per-host failures (timeout, WinRM errors) without failing the
+   entire job. Zero-result hosts get `end_host` (warn + skip). Play 2 uses
+   `end_play` when no XCCDF results exist at all (all hosts failed/skipped).
+
+6. **SCC 5.14 checksum is pinned** in the playbook vars (`scc_bundle_checksum`)
+   for integrity verification on download.
+
+7. **Network share deployment**: `scc_share_path` variable enables copying SCC
+   from a UNC network share (e.g., `\\server\scc`) instead of the default
+   80 MB WinRM transfer per host. Significant speedup for large inventories.
 
 ### Test results (Job 4375, Jul 17 2026)
 
@@ -264,9 +305,15 @@ Normalized: "52 hosts" (26 XCCDF files × 2 hosts).
 
 ### Optimization needed
 
-- **Disable non-Server benchmarks** before scan to reduce time from 38 min to ~5 min.
+> **[Updated Jul 17]** The first optimization below is now implemented.
+> The pipeline uses `--disableAll` + selective `--enableBenchmark` to enable
+> only benchmarks matching the host's OS version. This replaced the
+> `--enableAll` approach that evaluated all 35 benchmarks per host.
+
+- ~~**Disable non-Server benchmarks** before scan to reduce time from 38 min to ~5 min.
   Currently all 35 benchmarks evaluate on each host. Only the ~8 Windows Server
-  benchmarks are needed. Use `cscc --disableBenchmark <id>` for IE/Chrome/IIS/etc.
+  benchmarks are needed. Use `cscc --disableBenchmark <id>` for IE/Chrome/IIS/etc.~~
+  **DONE** — implemented via `--disableAll` + per-host `--enableBenchmark`.
 - **Check if content already installed** before `--installScap` to skip on re-scans
   of the same target (saves ~30s per host per benchmark).
 
@@ -297,8 +344,9 @@ DISA quarterly release
 
 SCC 5.14 supports fully programmatic content management:
 - `cscc --installScap <zip> MAC-3_Sensitive --force` installs from ZIP
-- `cscc --enableAll` enables all installed content
-- `cscc --setOpt ignoreCPEOVALResults 1` forces all benchmarks to evaluate
+- `cscc --disableAll` then `cscc --enableBenchmark <id>` for selective enablement
+  **[Updated Jul 17]** Replaces `--enableAll` for per-host OS scoping
+- `cscc --setOpt ignoreCPEOVALResults 1` forces all benchmarks to evaluate (WS2025 only)
 - No manual `options.xml` editing or GUI configuration required
 - Each scan deploys fresh SCC + installs content on the target — stateless
 
