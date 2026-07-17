@@ -238,8 +238,7 @@
               {{ _benchmarks.stdout_lines
                  | select('match', '^\[')
                  | select('search', '(?i)windows.server')
-                 | map('regex_search', '\]\s+(\S+)', '\1')
-                 | select('string')
+                 | map('regex_replace', '^.*\]\s+(\S+)\s.*$', '\1')
                  | list }}
 
         - name: Disable all benchmarks first
