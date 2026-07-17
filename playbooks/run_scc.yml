@@ -252,7 +252,7 @@
             _host_benchmark_ids: >-
               {{ _benchmarks.stdout_lines
                  | select('match', '^\[')
-                 | select('search', '(?i)windows.server.*' ~ _benchmark_match)
+                 | select('search', '(?i)windows[._]server[._]' ~ _benchmark_match)
                  | map('regex_replace', '^.*\]\s+(\S+)(\s.*)?$', '\1')
                  | list }}
 
