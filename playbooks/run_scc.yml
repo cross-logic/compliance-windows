@@ -165,17 +165,31 @@
     fetch_dest_dir: /tmp/compliance-results
 
     # OS build → SCAP benchmark mapping
-    # WS2025 (build 26100) has no DISA SCAP benchmark yet — scan with WS2022 + CPE override
+    # Each host gets only the benchmark matching its OS version.
+    # WS2025 (build 26100) has no DISA SCAP benchmark yet — scan with WS2022 + CPE override.
+    # In a mixed fleet (WS2019 + WS2022 + WS2025), each host installs and enables
+    # only its matching benchmark — no cross-version scanning.
     _os_benchmark_map:
-      '14393': 'WS2016_SCAP.zip'
-      '17763': 'WS2019_SCAP.zip'
-      '20348': 'WS2022_SCAP.zip'
-      '26100': 'WS2022_SCAP.zip'
+      '14393': { zip: 'WS2016_SCAP.zip', match: '2016' }
+      '17763': { zip: 'WS2019_SCAP.zip', match: '2019' }
+      '20348': { zip: 'WS2022_SCAP.zip', match: '2022' }
+      '26100': { zip: 'WS2022_SCAP.zip', match: '2022' }
     _os_build: "{{ ansible_kernel.split('.')[2] | default('20348') }}"
-    _benchmark_zip: "{{ _os_benchmark_map[_os_build] | default('WS2022_SCAP.zip') }}"
+    _os_info: "{{ _os_benchmark_map[_os_build] | default({'zip': 'WS2022_SCAP.zip', 'match': '2022'}) }}"
+    _benchmark_zip: "{{ _os_info.zip }}"
+    _benchmark_match: "{{ _os_info.match }}"
     _is_ws2025: "{{ _os_build == '26100' }}"
 
   tasks:
+    - name: Create local results directory (before per-host work)
+      ansible.builtin.file:
+        path: "{{ fetch_dest_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+      become: false
+
     - name: Run SCC scan with guaranteed cleanup
       block:
         # ── Deploy SCC to target ──────────────────────────────────────────
@@ -221,10 +235,11 @@
             path: "{{ target_scc_dir }}\\{{ _benchmark_zip }}"
             state: absent
 
-        # ── Enable only Windows Server STIG benchmarks (M1) ──────────────
-        # List all installed benchmarks, parse for Windows Server entries,
-        # enable only those. Avoids scanning 35 bundled benchmarks (IE,
-        # Chrome, IIS, Office, etc.) which inflated scan time to 38 min.
+        # ── Enable only this host's matching STIG benchmark (M1) ─────────
+        # In a mixed fleet (WS2019 + WS2022 + WS2025), each host enables
+        # only the benchmark matching its OS version. A WS2019 host enables
+        # only *_2019_* benchmarks, a WS2022 host only *_2022_*, etc.
+        # WS2025 maps to 2022 benchmarks (no native WS2025 SCAP yet).
         - name: List installed benchmarks
           ansible.windows.win_command:
             cmd: "{{ target_scc_dir }}\\cscc.exe --listAllBenchmarks"
@@ -232,33 +247,35 @@
           register: _benchmarks
           changed_when: false
 
-        - name: Parse Windows Server benchmark IDs
+        - name: Parse matching benchmark IDs for this host OS
           ansible.builtin.set_fact:
-            _ws_benchmark_ids: >-
+            _host_benchmark_ids: >-
               {{ _benchmarks.stdout_lines
                  | select('match', '^\[')
-                 | select('search', '(?i)windows.server')
+                 | select('search', '(?i)windows.server.*' ~ _benchmark_match)
                  | map('regex_replace', '^.*\]\s+(\S+)\s.*$', '\1')
                  | list }}
 
-        - name: Disable all benchmarks first
+        - name: Disable all benchmarks
           ansible.windows.win_command:
             cmd: "{{ target_scc_dir }}\\cscc.exe --disableAll"
             chdir: "{{ target_scc_dir }}"
 
-        - name: Enable only Windows Server benchmarks
+        - name: Enable matching benchmarks for this host
           ansible.windows.win_command:
             cmd: "{{ target_scc_dir }}\\cscc.exe --enableBenchmark {{ item }}"
             chdir: "{{ target_scc_dir }}"
-          loop: "{{ _ws_benchmark_ids }}"
+          loop: "{{ _host_benchmark_ids }}"
           loop_control:
             label: "{{ item }}"
-          when: _ws_benchmark_ids | length > 0
+          when: _host_benchmark_ids | length > 0
 
         - name: Report enabled benchmarks
           ansible.builtin.debug:
-            msg: "Enabled {{ _ws_benchmark_ids | length }} Windows Server benchmark(s) on {{ inventory_hostname }}: {{ _ws_benchmark_ids | join(', ') }}"
-            verbosity: 0
+            msg: >-
+              {{ inventory_hostname }} (build {{ _os_build }}):
+              enabled {{ _host_benchmark_ids | length }} benchmark(s)
+              matching WS{{ _benchmark_match }}: {{ _host_benchmark_ids | join(', ') }}
 
         # ── CPE override for WS2025 only (M2) ────────────────────────────
         # WS2025 has no native DISA SCAP benchmark yet. Force the WS2022
@@ -303,10 +320,7 @@
             recurse: true
           register: _result_files_target
 
-        # ── M3: Graceful handling when scan produces no results ─────────
-        # Warn and skip this host instead of failing the entire job.
-        # Common causes: intermittent WinRM timeout, SCC silent failure,
-        # CPE rejecting all benchmarks on an unrecognized OS version.
+        # ── Warn and skip if scan produced no results ─────────────────
         - name: Read SCC error log if no results
           ansible.windows.win_powershell:
             script: |
@@ -335,15 +349,6 @@
             - name: Skip to next host
               ansible.builtin.meta: end_host
 
-        - name: Create local results directory
-          ansible.builtin.file:
-            path: "{{ fetch_dest_dir }}"
-            state: directory
-            mode: '0755'
-          delegate_to: localhost
-          run_once: true
-          become: false
-
         - name: Fetch all XCCDF results from target to EE
           ansible.builtin.fetch:
             src: "{{ item.path }}"
@@ -354,8 +359,21 @@
             label: "{{ item.path | regex_replace('.*[/\\\\]', '') }}"
             extended: true
 
+      # ── M3: Catch task failures (timeout, WinRM errors) per-host ──────
+      # Without rescue, a timeout on one host fails the entire play and
+      # prevents other hosts' results from being normalized.
+      rescue:
+        - name: Report host failure
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: {{ inventory_hostname }} failed during SCC scan.
+              Error: {{ ansible_failed_result.msg | default('unknown') | truncate(300) }}.
+              Skipping this host — other hosts will continue.
+
+        - name: Skip failed host
+          ansible.builtin.meta: end_host
+
       always:
-        # ── Cleanup on target (runs even if scan fails) ────────────────────
         - name: Remove scan results from target
           ansible.windows.win_file:
             path: "{{ target_results_dir }}"
@@ -370,8 +388,6 @@
       ansible.builtin.debug:
         msg: >-
           SCC scan complete on {{ inventory_hostname }}.
-          Exit code: {{ _scan_result.rc | default('N/A') }}
-          (0=all pass, 1=some fail).
           XCCDF results fetched to {{ fetch_dest_dir }}.
 
 
@@ -400,11 +416,15 @@
         patterns: "xccdf-results-*.xml,*XCCDF*.xml"
       register: _result_files
 
-    - name: Fail if no results found
-      ansible.builtin.fail:
+    - name: Warn if no results found
+      ansible.builtin.debug:
         msg: >-
-          No XCCDF result files found in {{ fetch_dest_dir }}.
-          Ensure the scan play completed successfully.
+          WARNING: No XCCDF result files found in {{ fetch_dest_dir }}.
+          All hosts may have failed or been skipped. Check Play 1 output.
+      when: _result_files.files | length == 0
+
+    - name: End if nothing to normalize
+      ansible.builtin.meta: end_play
       when: _result_files.files | length == 0
 
     # Normalize each host's XCCDF results individually. Each loop
