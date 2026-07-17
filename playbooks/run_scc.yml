@@ -236,10 +236,16 @@
           ansible.builtin.set_fact:
             _ws_benchmark_ids: >-
               {{ _benchmarks.stdout_lines
+                 | select('match', '^\[')
                  | select('search', '(?i)windows.server')
-                 | map('regex_search', '\S+')
+                 | map('regex_search', '\]\s+(\S+)', '\1')
                  | select('string')
                  | list }}
+
+        - name: Disable all benchmarks first
+          ansible.windows.win_command:
+            cmd: "{{ target_scc_dir }}\\cscc.exe --disableAll"
+            chdir: "{{ target_scc_dir }}"
 
         - name: Enable only Windows Server benchmarks
           ansible.windows.win_command:
