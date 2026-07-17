@@ -233,11 +233,15 @@
         - name: Verify SCC configuration before scan
           ansible.windows.win_powershell:
             script: |
-              $opt = [xml](Get-Content "{{ target_scc_dir }}\options.xml")
+              $optPath = "{{ target_scc_dir }}\options.xml"
+              $content = Get-Content $optPath -Raw
               @{
-                  ignoreCPE = $opt.options.ignoreCPEOVALResults
-                  enabledBenchmarks = ($opt.options.scapScan.scap12DataStreamCollection.scap12DataStream | Where-Object { $_.enabled -eq '1' }).benchmarkId -join ', '
-                  totalBenchmarks = ($opt.options.scapScan.scap12DataStreamCollection.scap12DataStream).Count
+                  ignoreCPE = if ($content -match 'ignoreCPEOVALResults>(\d+)') { $Matches[1] } else { 'not found' }
+                  optionsLength = $content.Length
+                  profileMeta = if ($content -match 'sccConfigProfileMetaData>(.*?)</') { $Matches[1].Substring(0, [Math]::Min(200, $Matches[1].Length)) } else { 'not found' }
+                  scap12Count = ([regex]::Matches($content, 'scap12DataStream ')).Count
+                  windowsServerEntries = ([regex]::Matches($content, 'Windows.Server')).Count
+                  allEnabledCount = ([regex]::Matches($content, 'enabled="1"')).Count
               } | ConvertTo-Json
           register: _opt_check
           changed_when: false
