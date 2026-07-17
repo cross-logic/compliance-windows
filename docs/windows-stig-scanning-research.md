@@ -183,29 +183,92 @@ Sources:
 
 ---
 
-## Recommended Deployment Architecture
+## Validated Deployment Architecture (Jul 17, 2026)
+
+Confirmed working end-to-end on Netrunner (Controller job 4375).
 
 ```
 EE Build Time (safe to redistribute):
-  ├── SCAP benchmark ZIPs (WS2016, WS2019, WS2022, WS2025) — public domain
-  ├── Pre-configured options.xml (all 4 benchmarks enabled) — our config
+  ├── SCAP benchmark ZIPs (WS2016, WS2019, WS2022) — NIWC enhanced SCAP 1.4
+  │   (from github.com/niwc-atlantic/scap-content-library, public domain)
   └── Ansible collection (playbooks, normalizer) — our code
 
-Scan Time (ephemeral):
-  1. Download SCC portable ZIP from dl.dod.cyber.mil (cache on EE node)
-  2. Extract SCC, inject our content + options.xml into Resources/Content/
-  3. Deploy configured SCC to Windows targets
-  4. cscc.exe -u <results_dir> — CPE auto-selects correct benchmark
-  5. Fetch XCCDF results, cleanup SCC from targets
-  6. Normalize to CFF, POST to dashboard API
+Scan Time (ephemeral, per-target):
+  Play 0 (EE/localhost):
+    1. Download SCC 5.14 portable ZIP from dl.dod.cyber.mil (cache on EE)
+    2. Extract inner portable ZIP (bundle is ZIP-in-ZIP)
+
+  Play 1 (Windows targets):
+    3. Copy SCC + SCAP ZIPs from EE to target
+    4. Install benchmarks: cscc --installScap <zip> MAC-3_Sensitive --force
+    5. Enable all: cscc --enableAll
+    6. Override CPE: cscc --setOpt ignoreCPEOVALResults 1
+    7. Scan: cscc -u <results_dir> --setOpt dirXxxEnabled 0 (×7 for flat output)
+    8. Find + fetch *XCCDF*.xml results back to EE
+    9. Cleanup: remove SCC + results from target
+
+  Play 2 (EE/localhost):
+    10. Normalize XCCDF to CFF via normalize_xccdf module
+    11. Compose NDJSON POST body
+    12. Stream to compliance API
 ```
 
-Benefits:
-- Single artifact for all Windows Server versions (2016–2025)
-- Automatic version matching via CPE (no Ansible OS-detection logic)
-- Legal safety — SCC binary never redistributed
-- Content lifecycle — update benchmark ZIPs quarterly, rebuild EE
-- Air-gap support — cache persists after first download
+### SCC CLI Reference (validated)
+
+| Flag | Purpose | Notes |
+|------|---------|-------|
+| `-u <path>` | User results directory | Directory must pre-exist |
+| `--installScap <file> <profile>` | Install SCAP content from ZIP | `--force` to reinstall |
+| `--enableAll` | Enable all installed benchmarks | |
+| `--setOpt ignoreCPEOVALResults 1` | Force all benchmarks to run | Required for WS2025 (no WS2025 benchmark yet) |
+| `--setOpt dirXxxEnabled 0` (×7) | Flatten result directory | See playbook for all 7 keys |
+| `--listAllBenchmarks` | List installed benchmark IDs | Use for debugging |
+| `--applicableToAll <id>` | Force one benchmark applicable | Per-benchmark, less reliable than ignoreCPE |
+| `-d` | Debug mode | Creates verbose log |
+| `chdir` | **Required** — SCC must run from its own directory | Finds options.xml, Resources/ |
+
+### Key implementation discoveries
+
+1. **`cscc.exe` is Windows-only** — content installation (`--installScap`) must
+   run on the Windows target, not on the EE (Linux). The playbook deploys SCC
+   first, then installs benchmarks on the target.
+
+2. **`--enableAll` does NOT set `enabled="1"`** in options.xml. SCC uses a
+   different internal representation. The XML `allEnabledCount=0` in our
+   diagnostic was misleading — content IS enabled, just not via that attribute.
+
+3. **`ignoreCPEOVALResults=1`** is the global "Run All Content" override.
+   Required for WS2025 hosts until a WS2025 SCAP benchmark exists. Without it,
+   CPE correctly rejects WS2016/2019/2022 benchmarks on WS2025 → zero results.
+
+4. **SCC 5.14 ships with 27 bundled content streams** (IE 11, Defender, .NET,
+   Edge, Firewall, Updates, IIS, Chrome, etc.) but NO Windows Server STIG.
+   Server benchmarks must be installed separately via `--installScap`.
+
+5. **Host intermittency**: On identical configuration, 1/3 hosts may produce
+   zero results (RC 0, empty output dir, no error log). Root cause unconfirmed
+   — likely WinRM session timeout or SCC internal failure that returns RC 0.
+   Playbook should handle this gracefully (warn, don't fail the entire job).
+
+### Test results (Job 4375, Jul 17 2026)
+
+| Host | XCCDF Files | Windows Server STIG? | Status |
+|------|------------|---------------------|--------|
+| nm-prod-win202501 | 0 | No | Failed (intermittent) |
+| nm-prod-win202502 | 26 | Yes (2022 V2R7 + V2R8) | Success |
+| nm-prod-win202503 | 26 | Yes (2022 V2R7 + V2R8) | Success |
+
+Results included: MS_Windows_Server_2022_STIG (2 versions), Windows_Server_2019_STIG
+(2 versions), Windows_Server_2016_STIG (2 versions), plus 20 bundled content STIGs.
+Normalized: "52 hosts" (26 XCCDF files × 2 hosts).
+
+### Optimization needed
+
+- **Disable non-Server benchmarks** before scan to reduce time from 38 min to ~5 min.
+  Currently all 35 benchmarks evaluate on each host. Only the ~8 Windows Server
+  benchmarks are needed. Use `cscc --disableBenchmark <id>` for IE/Chrome/IIS/etc.
+- **Check if content already installed** before `--installScap` to skip on re-scans
+  of the same target (saves ~30s per host per benchmark).
 
 ---
 
@@ -224,21 +287,20 @@ Benefits:
 ```
 DISA quarterly release
   → Download new benchmark ZIPs from public.cyber.mil/stigs/scap/
-    → Place in ee/_build/scap-content/ (replaces previous versions)
-      → Update options.xml if new content streams added
-        → Rebuild EE → push to PAH
-          → Next scan uses new content automatically
+    or github.com/niwc-atlantic/scap-content-library (SCAP 1.4 enhanced)
+  → Place in ee/_build/scap-content/ (replaces previous versions)
+  → Rebuild EE → push to PAH
+  → Next scan installs new content on targets via --installScap automatically
 ```
 
-### options.xml Management
+### Content Installation (automated, no manual options.xml needed)
 
-- Plain XML file stored in `ee/_build/scc-config/options.xml`
-- Initial creation: configure one SCC instance via `cscc --config` or GUI
-  on a Windows host, export the resulting `options.xml`
-- Enable all Windows Server benchmarks + select appropriate profiles
-- At scan time: Ansible injects this file into the downloaded SCC's directory
-- Do NOT try to programmatically generate from scratch (undocumented internal
-  structure) — configure-and-copy is the supported pattern
+SCC 5.14 supports fully programmatic content management:
+- `cscc --installScap <zip> MAC-3_Sensitive --force` installs from ZIP
+- `cscc --enableAll` enables all installed content
+- `cscc --setOpt ignoreCPEOVALResults 1` forces all benchmarks to evaluate
+- No manual `options.xml` editing or GUI configuration required
+- Each scan deploys fresh SCC + installs content on the target — stateless
 
 ### Version Tracking
 
