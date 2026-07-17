@@ -253,7 +253,8 @@
               {{ _benchmarks.stdout_lines
                  | select('match', '^\[')
                  | select('search', '(?i)windows[._]server[._]' ~ _benchmark_match)
-                 | map('regex_replace', '^.*\]\s+(\S+)(\s.*)?$', '\1')
+                 | map('regex_replace', '^.*\]\s+', '')
+                 | map('regex_replace', '\s+.*$', '')
                  | list }}
 
         - name: Disable all benchmarks
