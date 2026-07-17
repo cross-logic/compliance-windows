@@ -28,7 +28,7 @@
 # domain-joined hosts, use run_powerstig.yml. See docs/scanner-selection-guide.md.
 #
 # Variables:
-#   scc_version: DISA SCC version to download (default: 5.10.2)
+#   scc_version: DISA SCC version to download (default: 5.14)
 #   scc_bundle_checksum: SHA256 checksum of the bundle ZIP (version-pinned)
 #   scc_cache_dir: EE cache directory for SCC (default: /tmp/compliance-scc)
 #   target_results_dir: temp directory on Windows targets for scan results
@@ -39,6 +39,8 @@
 #   backstage_api_url: required URL for compliance API endpoint
 #   ingest_token: required per-scan security token (ADR-010)
 #   compliance_target_hosts: inventory pattern to scan (default: all)
+#   scc_share_path: optional UNC path to pre-staged SCC (e.g. \\server\scc).
+#     When set, targets copy from the share instead of 80MB WinRM transfer.
 #   aap_validate_certs: TLS verification (default: false)
 
 # ── Play 0: Download SCC on execution node (ephemeral with cache) ──────
@@ -51,7 +53,7 @@
   vars:
     scc_version: "5.14"
     scc_download_url: "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/scc-{{ scc_version }}_Windows_bundle.zip"
-    scc_bundle_checksum: ""
+    scc_bundle_checksum: "sha256:3f6491cbe3975bd4432ab01b694599e26e068f13de3a21757371791572ca1ebb"
     scc_cache_dir: /tmp/compliance-scc
     scc_zip_filename: "scc-{{ scc_version }}_Windows_bundle.zip"
     scc_zip_path: "{{ scc_cache_dir }}/{{ scc_zip_filename }}"
@@ -160,55 +162,69 @@
     scap_content_ee_dir: /usr/share/scap/windows
     target_results_dir: 'C:\Temp\compliance-scan'
     target_scc_dir: 'C:\Temp\compliance-scc'
-
-    # Fetch destination on EE
     fetch_dest_dir: /tmp/compliance-results
+
+    # OS build → SCAP benchmark mapping
+    # WS2025 (build 26100) has no DISA SCAP benchmark yet — scan with WS2022 + CPE override
+    _os_benchmark_map:
+      '14393': 'WS2016_SCAP.zip'
+      '17763': 'WS2019_SCAP.zip'
+      '20348': 'WS2022_SCAP.zip'
+      '26100': 'WS2022_SCAP.zip'
+    _os_build: "{{ ansible_kernel.split('.')[2] | default('20348') }}"
+    _benchmark_zip: "{{ _os_benchmark_map[_os_build] | default('WS2022_SCAP.zip') }}"
+    _is_ws2025: "{{ _os_build == '26100' }}"
 
   tasks:
     - name: Run SCC scan with guaranteed cleanup
       block:
-        # ── Copy SCC from EE to target ────────────────────────────────────
+        # ── Deploy SCC to target ──────────────────────────────────────────
+        # Two modes: network share (fast, ~0 WinRM overhead) or WinRM copy
+        # (default, ~80 MB per host). Set scc_share_path to a UNC path
+        # (e.g. \\fileserver\compliance\scc) to use the share mode.
         - name: Create SCC directory on target
           ansible.windows.win_file:
             path: "{{ target_scc_dir }}"
             state: directory
 
-        - name: Copy SCC to target
+        - name: Copy SCC from network share
+          ansible.windows.win_copy:
+            src: "{{ scc_share_path }}\\"
+            dest: "{{ target_scc_dir }}"
+            remote_src: true
+          when: scc_share_path | default('') | length > 0
+
+        - name: Copy SCC from EE via WinRM
           ansible.windows.win_copy:
             src: "{{ cscc_exe_dir }}/"
             dest: "{{ target_scc_dir }}"
+          when: scc_share_path | default('') | length == 0
 
-        # ── Install SCAP benchmarks into SCC on target ────────────────
-        # Copy benchmark ZIPs from EE, install via --installScap CLI,
-        # enable all content. CPE auto-selects per host OS at scan time.
-        - name: Copy SCAP benchmark ZIPs to target
+        # ── Install matching SCAP benchmark (M4: per-host selection) ──────
+        # Copy only the benchmark matching this host's OS version.
+        # WS2025 uses WS2022 benchmark with CPE override (M2).
+        - name: Copy matching SCAP benchmark to target
           ansible.windows.win_copy:
-            src: "{{ scap_content_ee_dir }}/"
-            dest: "{{ target_scc_dir }}\\scap-staging"
+            src: "{{ scap_content_ee_dir }}/{{ _benchmark_zip }}"
+            dest: "{{ target_scc_dir }}\\{{ _benchmark_zip }}"
 
-        - name: Find benchmark ZIPs on target
-          ansible.windows.win_find:
-            paths: "{{ target_scc_dir }}\\scap-staging"
-            patterns: "*.zip"
-          register: _target_benchmarks
-
-        - name: Install each SCAP benchmark into SCC
+        - name: Install SCAP benchmark into SCC
           ansible.windows.win_command:
             cmd: >-
               {{ target_scc_dir }}\cscc.exe
-              --installScap {{ item.path }} MAC-3_Sensitive --force
-            chdir: "{{ target_scc_dir }}"
-          loop: "{{ _target_benchmarks.files | default([]) }}"
-          loop_control:
-            label: "{{ item.path | regex_replace('.*[/\\\\]', '') }}"
-          when: _target_benchmarks.files | default([]) | length > 0
-          register: _install_results
-
-        - name: Enable all installed benchmarks
-          ansible.windows.win_command:
-            cmd: "{{ target_scc_dir }}\\cscc.exe --enableAll"
+              --installScap {{ target_scc_dir }}\{{ _benchmark_zip }}
+              MAC-3_Sensitive --force
             chdir: "{{ target_scc_dir }}"
 
+        - name: Remove benchmark ZIP from target
+          ansible.windows.win_file:
+            path: "{{ target_scc_dir }}\\{{ _benchmark_zip }}"
+            state: absent
+
+        # ── Enable only Windows Server STIG benchmarks (M1) ──────────────
+        # List all installed benchmarks, parse for Windows Server entries,
+        # enable only those. Avoids scanning 35 bundled benchmarks (IE,
+        # Chrome, IIS, Office, etc.) which inflated scan time to 38 min.
         - name: List installed benchmarks
           ansible.windows.win_command:
             cmd: "{{ target_scc_dir }}\\cscc.exe --listAllBenchmarks"
@@ -216,39 +232,38 @@
           register: _benchmarks
           changed_when: false
 
-        - name: Show installed benchmarks
-          ansible.builtin.debug:
-            msg: "{{ _benchmarks.stdout }}"
+        - name: Parse Windows Server benchmark IDs
+          ansible.builtin.set_fact:
+            _ws_benchmark_ids: >-
+              {{ _benchmarks.stdout_lines
+                 | select('search', '(?i)windows.server')
+                 | map('regex_search', '\S+')
+                 | select('string')
+                 | list }}
 
-        - name: Ignore CPE applicability (force all benchmarks to run on all targets)
+        - name: Enable only Windows Server benchmarks
+          ansible.windows.win_command:
+            cmd: "{{ target_scc_dir }}\\cscc.exe --enableBenchmark {{ item }}"
+            chdir: "{{ target_scc_dir }}"
+          loop: "{{ _ws_benchmark_ids }}"
+          loop_control:
+            label: "{{ item }}"
+          when: _ws_benchmark_ids | length > 0
+
+        - name: Report enabled benchmarks
+          ansible.builtin.debug:
+            msg: "Enabled {{ _ws_benchmark_ids | length }} Windows Server benchmark(s) on {{ inventory_hostname }}: {{ _ws_benchmark_ids | join(', ') }}"
+            verbosity: 0
+
+        # ── CPE override for WS2025 only (M2) ────────────────────────────
+        # WS2025 has no native DISA SCAP benchmark yet. Force the WS2022
+        # benchmark to evaluate by ignoring CPE applicability checks.
+        # WS2019/2022 hosts use CPE normally (their benchmarks match).
+        - name: Override CPE applicability for WS2025
           ansible.windows.win_command:
             cmd: "{{ target_scc_dir }}\\cscc.exe --setOpt ignoreCPEOVALResults 1"
             chdir: "{{ target_scc_dir }}"
-
-        - name: Remove staging directory
-          ansible.windows.win_file:
-            path: "{{ target_scc_dir }}\\scap-staging"
-            state: absent
-
-        - name: Verify SCC configuration before scan
-          ansible.windows.win_powershell:
-            script: |
-              $optPath = "{{ target_scc_dir }}\options.xml"
-              $content = Get-Content $optPath -Raw
-              @{
-                  ignoreCPE = if ($content -match 'ignoreCPEOVALResults>(\d+)') { $Matches[1] } else { 'not found' }
-                  optionsLength = $content.Length
-                  profileMeta = if ($content -match 'sccConfigProfileMetaData>(.*?)</') { $Matches[1].Substring(0, [Math]::Min(200, $Matches[1].Length)) } else { 'not found' }
-                  scap12Count = ([regex]::Matches($content, 'scap12DataStream ')).Count
-                  windowsServerEntries = ([regex]::Matches($content, 'Windows.Server')).Count
-                  allEnabledCount = ([regex]::Matches($content, 'enabled="1"')).Count
-              } | ConvertTo-Json
-          register: _opt_check
-          changed_when: false
-
-        - name: Show SCC config state
-          ansible.builtin.debug:
-            msg: "{{ (_opt_check.output | join('')) }}"
+          when: _is_ws2025 | bool
 
         # ── Run SCC scan ──────────────────────────────────────────────
         - name: Create results directory on target
@@ -273,7 +288,7 @@
           register: _scan_result
           failed_when: _scan_result.rc > 1
           changed_when: false
-          timeout: 1800
+          timeout: 600
 
         # ── Fetch XCCDF results from target to EE ──────────────────────────
         - name: Find XCCDF result XML files on target
@@ -283,15 +298,11 @@
             recurse: true
           register: _result_files_target
 
-        - name: "Debug: Show SCC scan stdout/stderr"
-          ansible.builtin.debug:
-            msg: |
-              RC: {{ _scan_result.rc | default('?') }}
-              STDOUT: {{ _scan_result.stdout | default('(empty)') }}
-              STDERR: {{ _scan_result.stderr | default('(empty)') }}
-          when: _result_files_target.files | length == 0
-
-        - name: "Debug: Read SCC error log if it exists"
+        # ── M3: Graceful handling when scan produces no results ─────────
+        # Warn and skip this host instead of failing the entire job.
+        # Common causes: intermittent WinRM timeout, SCC silent failure,
+        # CPE rejecting all benchmarks on an unrecognized OS version.
+        - name: Read SCC error log if no results
           ansible.windows.win_powershell:
             script: |
               $logDir = "{{ target_results_dir }}\Logs"
@@ -301,62 +312,23 @@
                       "=== $($log.Name) ==="
                       Get-Content $log.FullName -Raw | Select-Object -First 1
                   }
-              } else { "No Logs directory" }
+              } else { "No error logs found" }
           register: _scc_error_log
           when: _result_files_target.files | length == 0
 
-        - name: Show SCC error log
-          ansible.builtin.debug:
-            msg: "{{ (_scc_error_log.output | default(['no log'])) | join('\n') }}"
-          when: _scc_error_log is defined and _scc_error_log is not skipped
-
-        - name: "Debug: Search for XCCDF results if not found in expected path"
-          ansible.windows.win_powershell:
-            script: |
-              $paths = @(
-                "{{ target_results_dir }}",
-                "{{ target_scc_dir }}\Sessions",
-                "$env:USERPROFILE\SCC",
-                "$env:LOCALAPPDATA\SCC",
-                "$env:TEMP\SCC"
-              )
-              $found = @()
-              foreach ($p in $paths) {
-                  if (Test-Path $p) {
-                      $files = Get-ChildItem $p -Recurse -Filter '*XCCDF*' -ErrorAction SilentlyContinue
-                      foreach ($f in $files) {
-                          $found += @{ Path = $f.FullName; Size = $f.Length }
-                      }
-                  }
-              }
-              if ($found.Count -eq 0) {
-                  $recentXml = Get-ChildItem C:\ -Recurse -Filter '*XCCDF*.xml' -ErrorAction SilentlyContinue |
-                      Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-15) } |
-                      Select-Object -First 10
-                  foreach ($f in $recentXml) {
-                      $found += @{ Path = $f.FullName; Size = $f.Length; Note = 'found via C:\ search' }
-                  }
-              }
-              @{
-                  FoundCount = $found.Count
-                  Files = @($found | Select-Object -First 20)
-                  UserProfile = $env:USERPROFILE
-                  ResultsDirContents = @(Get-ChildItem "{{ target_results_dir }}" -Recurse -ErrorAction SilentlyContinue | Select Name, Length, FullName | Select -First 20)
-              } | ConvertTo-Json -Depth 5
-          register: _xccdf_search
+        - name: Warn and skip host with no results
           when: _result_files_target.files | length == 0
+          block:
+            - name: Report no-results warning
+              ansible.builtin.debug:
+                msg: >-
+                  WARNING: No XCCDF results from {{ inventory_hostname }}.
+                  SCC RC={{ _scan_result.rc | default('?') }}.
+                  Error log: {{ (_scc_error_log.output | default(['none'])) | join(' ') | truncate(500) }}.
+                  Skipping this host — other hosts will continue.
 
-        - name: Show XCCDF search results
-          ansible.builtin.debug:
-            msg: "{{ (_xccdf_search.output | default(['{}']) | join('')) }}"
-          when: _xccdf_search is defined and _xccdf_search is not skipped
-
-        - name: Fail if no XCCDF results found
-          ansible.builtin.fail:
-            msg: >-
-              No XCCDF result files found in {{ target_results_dir }}.
-              SCC scan may have failed. Check SCC output above.
-          when: _result_files_target.files | length == 0
+            - name: Skip to next host
+              ansible.builtin.meta: end_host
 
         - name: Create local results directory
           ansible.builtin.file:

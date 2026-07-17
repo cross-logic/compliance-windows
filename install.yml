@@ -7,8 +7,8 @@
 #   ansible-playbook install.yml -e aap_host=... -e aap_token=... -e scanner=both
 #
 # Scanner modes (set via -e scanner=<mode>):
-#   powerstig (default) — DSC-based scanning, no external downloads, recommended
-#   scc                 — SCAP 1.3 certified, portable SCC at scan time
+#   scc (default)       — SCAP 1.3 certified, portable SCC at scan time, recommended
+#   powerstig           — DSC-based scanning, domain-joined hosts only
 #   both                — creates both scan JTs, shared remediation JT
 #
 # See docs/scanner-selection-guide.md for guidance on choosing a scanner.
@@ -28,7 +28,7 @@
     ee_name: "{{ execution_environment | default('compliance-windows') }}"
     inventory_name: "{{ inventory | default('compliance-windows-inventory') }}"
 
-    scanner_mode: "{{ scanner | default('powerstig') }}"
+    scanner_mode: "{{ scanner | default('scc') }}"
 
     profile_base:
       slug: "windows-server-stig"
@@ -110,7 +110,7 @@
           - scanner_mode in ['powerstig', 'scc', 'both']
         fail_msg: >-
           Set AAP_HOST and AAP_API_TOKEN environment variables.
-          scanner_mode must be 'powerstig' (default), 'scc', or 'both'.
+          scanner_mode must be 'scc' (default), 'powerstig', or 'both'.
 
     - name: Load crosswalk definitions
       ansible.builtin.include_vars:

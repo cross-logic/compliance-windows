@@ -15,9 +15,10 @@ content_role: windows_manage_stig
 wrapper_collection: security.compliance_windows
 normalizer_role: normalize_stig_findings
 scanner_options:
-  - ansible
+  - scc
   - powerstig
 playbooks:
-  scan: playbooks/scan-windows-stig.yml
+  scan: playbooks/run_scc.yml
+  scan_powerstig: playbooks/run_powerstig.yml
   remediate: playbooks/remediate-windows-stig.yml
   verify: playbooks/verify-windows-stig.yml
