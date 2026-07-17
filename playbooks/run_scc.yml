@@ -220,27 +220,33 @@
           ansible.builtin.debug:
             msg: "{{ _benchmarks.stdout }}"
 
-        - name: Force Windows Server benchmarks applicable to all targets
+        - name: Ignore CPE applicability (force all benchmarks to run on all targets)
           ansible.windows.win_command:
-            cmd: "{{ target_scc_dir }}\\cscc.exe --applicableToAll {{ item }}"
+            cmd: "{{ target_scc_dir }}\\cscc.exe --setOpt ignoreCPEOVALResults 1"
             chdir: "{{ target_scc_dir }}"
-          loop:
-            - MS_Windows_Server_2022_STIG
-            - Windows_Server_2019_STIG
-            - Windows_Server_2016_STIG
-          failed_when: false
 
         - name: Remove staging directory
           ansible.windows.win_file:
             path: "{{ target_scc_dir }}\\scap-staging"
             state: absent
 
+        - name: Verify SCC configuration before scan
+          ansible.windows.win_powershell:
+            script: |
+              $opt = [xml](Get-Content "{{ target_scc_dir }}\options.xml")
+              @{
+                  ignoreCPE = $opt.options.ignoreCPEOVALResults
+                  enabledBenchmarks = ($opt.options.scapScan.scap12DataStreamCollection.scap12DataStream | Where-Object { $_.enabled -eq '1' }).benchmarkId -join ', '
+                  totalBenchmarks = ($opt.options.scapScan.scap12DataStreamCollection.scap12DataStream).Count
+              } | ConvertTo-Json
+          register: _opt_check
+          changed_when: false
+
+        - name: Show SCC config state
+          ansible.builtin.debug:
+            msg: "{{ (_opt_check.output | join('')) }}"
+
         # ── Run SCC scan ──────────────────────────────────────────────
-        # SCC CLI reference:
-        #   -u <path>: output/results directory
-        #   --setOpt dirXxxEnabled 0: flatten result directory structure
-        # SCAP content is inside SCC (Resources/Content/, injected in Play 0)
-        # CPE auto-selects the correct benchmark per host OS version
         - name: Create results directory on target
           ansible.windows.win_file:
             path: "{{ target_results_dir }}"
