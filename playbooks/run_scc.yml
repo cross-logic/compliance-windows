@@ -426,7 +426,6 @@
         framework: "DISA_STIG"
         certification_status: "certified"
         certification_authority: "SCAP 1.3"
-        scanner_name: "scc"
         rules_metadata_file: "{{ (_rules_files.files | default([]) | selectattr('path', 'search', '_2022') | map(attribute='path') | first | default((_rules_files.files | default([]) | first | default({})).path | default(''))) }}"
         compose_post_body: "{{ (backstage_api_url | default('')) | length > 0 }}"
         post_body_format: ndjson
