@@ -1,0 +1,169 @@
+# =============================================================================
+# AAP Impact Overrides for Windows Server STIG Rules
+# =============================================================================
+#
+# Curated classifications for rules that affect Ansible Automation Platform
+# connectivity, authentication, or management capabilities on Windows hosts.
+#
+# Impact levels:
+#   safe                - No impact on AAP operations
+#   breaks-connectivity - Will disrupt WinRM/SSH connectivity to the host
+#   requires-config     - Needs AAP-side configuration changes to remain functional
+#   degrades-auth       - Affects authentication mechanisms used by AAP
+#   review-required     - Environment-specific; may or may not impact AAP
+#
+# =============================================================================
+
+overrides:
+
+  # ── WinRM / Remote Management ─────────────────────────────────────────────
+
+  V-254378:
+    aap_impact: requires-config
+    aap_impact_reason: >
+      Disables WinRM client Basic authentication. AAP must use Kerberos,
+      CredSSP, or certificate-based authentication instead of Basic.
+
+  V-254379:
+    aap_impact: breaks-connectivity
+    aap_impact_reason: >
+      Disables unencrypted WinRM client traffic. AAP connections MUST use
+      HTTPS (port 5986) or message-level encryption. Ensure
+      ansible_winrm_transport=ntlm or kerberos with ansible_port=5986.
+
+  V-254381:
+    aap_impact: requires-config
+    aap_impact_reason: >
+      Disables WinRM service Basic authentication. AAP must use a
+      non-Basic transport (ntlm, kerberos, credssp, certificate).
+      Default AAP WinRM configuration already uses ntlm.
+
+  V-254382:
+    aap_impact: breaks-connectivity
+    aap_impact_reason: >
+      Disables unencrypted WinRM service traffic. All AAP WinRM
+      connections must use HTTPS or message-level encryption.
+      Configure ansible_winrm_scheme=https and ansible_port=5986.
+
+  V-254383:
+    aap_impact: review-required
+    aap_impact_reason: >
+      Disables WinRM RunAs credentials storage. If AAP uses become
+      (runas) with stored credentials, this will break privilege
+      escalation. Direct admin connections are unaffected.
+
+  V-254380:
+    aap_impact: requires-config
+    aap_impact_reason: >
+      Disables WinRM client Digest authentication. Ensure AAP uses
+      ntlm, kerberos, or certificate transport instead.
+
+  V-254408:
+    aap_impact: breaks-connectivity
+    aap_impact_reason: >
+      WinRM service must be running and set to auto-start. This rule
+      ENABLES WinRM, which is required for AAP connectivity.
+      Impact is positive -- but if accidentally inverted, connectivity breaks.
+
+  # ── Firewall ──────────────────────────────────────────────────────────────
+
+  V-254421:
+    aap_impact: breaks-connectivity
+    aap_impact_reason: >
+      Enables Windows Firewall. If WinRM inbound rules (TCP 5985/5986)
+      are not pre-configured, all AAP connections will be blocked.
+      Ensure firewall rules for WinRM exist before enforcing.
+
+  # ── Authentication & NTLM ────────────────────────────────────────────────
+
+  V-254273:
+    aap_impact: degrades-auth
+    aap_impact_reason: >
+      Requires NTLMv2 session security for clients. AAP must use
+      NTLMv2-capable authentication. Older pywinrm versions may fail;
+      ensure pywinrm >= 0.4.0 on the execution environment.
+
+  V-254274:
+    aap_impact: degrades-auth
+    aap_impact_reason: >
+      Requires NTLMv2 session security for servers. Same requirement
+      as V-254273 on the server side; AAP EE must support NTLMv2.
+
+  V-254475:
+    aap_impact: breaks-connectivity
+    aap_impact_reason: >
+      Sets LAN Manager authentication to NTLMv2 only (level 5).
+      This blocks NTLMv1 and LM authentication entirely. AAP must
+      use NTLMv2 or Kerberos. Classified as manual control in
+      infra.windows_ops due to lockout risk.
+
+  V-254441:
+    aap_impact: degrades-auth
+    aap_impact_reason: >
+      Enables Credential Guard on domain-joined servers. This breaks
+      CredSSP and NTLM delegation scenarios. If AAP uses
+      ansible_winrm_transport=credssp, switch to kerberos.
+
+  V-254429:
+    aap_impact: review-required
+    aap_impact_reason: >
+      Local admin token filtering (LocalAccountTokenFilterPolicy=0).
+      Blocks remote admin access with local accounts. If AAP connects
+      with a local admin account, remote commands will run with
+      filtered (non-elevated) privileges. Use domain accounts or
+      configure UAC remote restrictions.
+
+  # ── FIPS / Cryptography ──────────────────────────────────────────────────
+
+  V-254285:
+    aap_impact: requires-config
+    aap_impact_reason: >
+      Enables FIPS-compliant cryptographic algorithms. This can break
+      WinRM CredSSP (which uses non-FIPS ciphers internally) and some
+      .NET-based remoting. Ensure AAP uses kerberos transport or HTTPS
+      with FIPS-compliant TLS cipher suites on the EE.
+
+  V-254287:
+    aap_impact: review-required
+    aap_impact_reason: >
+      Enforces .NET Framework strong cryptography. This forces TLS 1.2+
+      for .NET applications. Typically safe for AAP, but custom .NET
+      modules or scripts relying on legacy TLS may break.
+
+  # ── SMB / Network Services ───────────────────────────────────────────────
+
+  V-254339:
+    aap_impact: review-required
+    aap_impact_reason: >
+      Disables insecure guest logons to SMB servers. Safe for AAP
+      unless Ansible modules use anonymous SMB shares (e.g., win_share,
+      win_copy to UNC paths with guest access).
+
+  V-254275:
+    aap_impact: review-required
+    aap_impact_reason: >
+      Requires signed or encrypted secure channel data (Netlogon).
+      Safe for domain-joined hosts managed by AAP. Could cause issues
+      in workgroup scenarios where secure channel is not established.
+
+  # ── Service Management ───────────────────────────────────────────────────
+
+  V-254405:
+    aap_impact: safe
+    aap_impact_reason: >
+      Disables Telnet service. AAP uses WinRM, not Telnet.
+      No impact on automation.
+
+  V-254413:
+    aap_impact: review-required
+    aap_impact_reason: >
+      Disables Remote Desktop Gateway. If AAP operators use RD Gateway
+      as a jump host for manual troubleshooting, this removes that path.
+      AAP automation itself is unaffected (uses WinRM).
+
+  V-254446:
+    aap_impact: requires-config
+    aap_impact_reason: >
+      Prevents local accounts with blank passwords from network logon.
+      AAP service accounts MUST have passwords set. Any AAP credential
+      with an empty password will fail to authenticate.

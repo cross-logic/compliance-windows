@@ -82,6 +82,9 @@ def load_rules_metadata_map(filepath):
                 entry['fix_text'] = rule['fix_text']
             if entry:
                 result[rule_id] = entry
+                stig_id = rule.get('stig_id', '')
+                if stig_id and stig_id != rule_id:
+                    result[stig_id] = entry
         return result
     except Exception:
         return {}
@@ -282,6 +285,8 @@ def run_normalize(module):
     if rules_metadata_map:
         for f in all_findings:
             meta = rules_metadata_map.get(f['rule_id'])
+            if not meta:
+                meta = rules_metadata_map.get(f.get('stig_id', ''))
             if meta:
                 if meta.get('aap_impact'):
                     f['aap_impact'] = meta['aap_impact']

@@ -361,6 +361,92 @@ When a benchmark version changes:
 
 ---
 
+## Remediation Content Strategy (Option C — Jul 18, 2026)
+
+### CaC landscape finding
+
+No Compliance-as-Code standard Windows STIG content exists:
+
+| Source | Windows Coverage | Notes |
+|--------|-----------------|-------|
+| ComplianceAsCode / SCAP Security Guide (SSG) | **Zero** | Linux/UNIX only. No Windows profiles, roles, or benchmarks. |
+| ansible-lockdown | Per-repo (WS2019, WS2022) | Separate repos per version, no multi-version support, no shared data model. |
+| DISA supplemental Ansible content | Stale (Feb 2023) | Last update Feb 2023. No WS2025. Not maintained. |
+| infra.windows_ops | **275 (WS2022), 216 (WS2019), 248 (WS2025)** | Single role, auto-detection, data-driven task matrices, built-in reporting. |
+
+`infra.windows_ops` is the best available source by a significant margin —
+it covers three Windows Server versions in a single collection with
+auto-detection logic and data-driven configuration matrices that map
+directly to STIG rule IDs.
+
+### Option C (Hybrid) architecture
+
+A generator script (`scripts/generate_rules_metadata.py`) parses
+`infra.windows_ops` task files at **build time** and produces rules
+metadata YAML per Windows Server version with synthesized Ansible task
+previews. A separate `aap_impact_overrides.yml` file provides curated
+risk classifications for rules that affect WinRM, firewall, SMB, or
+other operational-risk categories.
+
+```
+Build-time (generator boundary — no runtime dependency):
+
+  infra.windows_ops/roles/windows_manage_stig/tasks/{version}/*.yml
+    → scripts/generate_rules_metadata.py
+      → rules/stig_windows_2019.yml  (216 rules + 63 manual)
+      → rules/stig_windows_2022.yml  (280 rules + 5 manual)
+      → rules/stig_windows_2025.yml  (246 rules + 35 manual)
+    + rules/aap_impact_overrides.yml  (~20 curated risk entries)
+
+Runtime (normalizer):
+  load_rules_metadata_map() indexes by rule_id (primary) and stig_id (alternate)
+  Merge loop falls back to stig_id when rule_id doesn't match
+  Dashboard shows "Automation Available" on findings with fix_text
+```
+
+The generator is the **decoupling boundary** — it has no runtime
+dependency on `infra.windows_ops`. The collection is only needed at
+generation time, not at scan time or in the EE.
+
+### Generated output
+
+849 rules across 3 Windows Server versions:
+
+| Version | With fix_text (automationAvailable) | Manual (no fix_text) | Total |
+|---------|-------------------------------------|----------------------|-------|
+| WS2022 | 280 | 5 | 285 |
+| WS2019 | 220 | 63 | 283 |
+| WS2025 | 246 | 35 | 281 |
+
+The generator extracts configuration matrices from `infra.windows_ops`
+task files (stig_id, title, severity, parameters), maps each category
+to the appropriate Ansible module (e.g., `registry_settings` maps to
+`win_regedit`, `user_rights_assignment` maps to `win_user_right`), and
+synthesizes `fix_text` as Ansible task YAML previews.
+
+### Normalizer change
+
+`load_rules_metadata_map()` now indexes by `stig_id` as an alternate
+key in addition to the primary `rule_id` key. The merge loop falls
+back to `stig_id` when `rule_id` doesn't match — this handles cases
+where XCCDF results use a different rule ID format than the metadata
+files.
+
+### Quarterly update workflow
+
+1. DISA publishes new STIG quarterly release
+2. Steve's team updates `infra.windows_ops` tasks (adds/removes V-IDs, adjusts params)
+3. Steve's team tags a release
+4. Dashboard team runs: `python scripts/generate_rules_metadata.py --source <path> --output rules/`
+5. Dashboard team reviews diff, updates `aap_impact_overrides.yml` for new risky rules
+6. Dashboard team rebuilds EE
+
+**Steve's team maintains `infra.windows_ops` — the dashboard team runs
+the generator.** No changes needed in the collection as long as the
+`stig_id` field is present in configuration matrices.
+
+---
+
 ## PowerSTIG (DSC-Based Scanner) — Secondary
 
 ### Why secondary
