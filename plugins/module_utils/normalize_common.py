@@ -22,6 +22,16 @@ except ImportError:
     HAS_YAML = False
 
 
+def _extract_vuln_discussion(raw):
+    """Extract VulnDiscussion text from DISA STIG description markup."""
+    if not raw:
+        return ''
+    m = re.search(r'<VulnDiscussion>(.*?)</VulnDiscussion>', raw, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return re.sub(r'<[^>]+>', '', raw).strip()
+
+
 SEVERITY_MAP = {
     'high': 'CAT_I',
     'medium': 'CAT_II',
@@ -35,6 +45,7 @@ STATUS_MAP = {
     'error': 'error',
     'unknown': 'error',
     'notapplicable': 'not_applicable',
+    'notchecked': 'not_checked',
     'informational': 'pass',
     'fixed': 'pass',
 }
@@ -93,7 +104,7 @@ def find_ns(root):
     return ''
 
 
-def parse_xccdf_results(filepath, framework='auto', scanner_name='openscap'):
+def parse_xccdf_results(filepath, framework='auto'):
     """Parse an XCCDF result XML file and return normalized findings."""
     tree = ET.parse(filepath)
     root = tree.getroot()
@@ -137,7 +148,8 @@ def parse_xccdf_results(filepath, framework='auto', scanner_name='openscap'):
             check_text = ''.join(rationale_el.itertext()).strip() if rationale_el is not None else ''
 
             title = title_el.text if title_el is not None and title_el.text else ''
-            description = ''.join(desc_el.itertext()).strip() if desc_el is not None else ''
+            raw_desc = ''.join(desc_el.itertext()).strip() if desc_el is not None else ''
+            description = _extract_vuln_discussion(raw_desc)
 
             stig_id = ''
             cis_id = ''
@@ -190,9 +202,9 @@ def parse_xccdf_results(filepath, framework='auto', scanner_name='openscap'):
 
         meta = rule_meta.get(rule_id, {})
 
-        short_rule_id = re.sub(r'^xccdf_org\.ssgproject\.content_rule_', '', rule_id)
-        short_rule_id = re.sub(r'^xccdf_mil\.disa\.stig_rule_', '', short_rule_id)
-        short_rule_id = re.sub(r'_rule$', '', short_rule_id)
+        short_rule_id = re.sub(
+            r'^xccdf_org\.ssgproject\.content_rule_', '', rule_id,
+        )
 
         rule_title = meta.get('title', short_rule_id)
         fix_text = meta.get('fix_text', '')
@@ -211,7 +223,7 @@ def parse_xccdf_results(filepath, framework='auto', scanner_name='openscap'):
             'severity': SEVERITY_MAP.get(severity_attr, 'CAT_II'),
             'status': STATUS_MAP.get(status_text, 'error'),
             'host': host,
-            'scanner': scanner_name,
+            'scanner': 'openscap',
             'evidence': {
                 'actual': status_text,
                 'expected': 'pass',
@@ -239,7 +251,6 @@ def run_normalize(module):
     cert_authority = module.params['certification_authority']
     framework = module.params['framework']
     rules_metadata_file = module.params['rules_metadata_file']
-    scanner_name = module.params.get('scanner_name', 'openscap')
 
     rules_metadata_map = load_rules_metadata_map(rules_metadata_file)
 
@@ -253,7 +264,7 @@ def run_normalize(module):
             continue
 
         try:
-            host, findings = parse_xccdf_results(filepath, framework, scanner_name)
+            host, findings = parse_xccdf_results(filepath, framework)
             hosts_processed += 1
             all_findings.extend(findings)
 
@@ -285,8 +296,8 @@ def run_normalize(module):
 
     report = {
         'schema_version': '1.0.0',
-        'scanner': scanner_name,
-        'profile': profile_name or 'Compliance Scan',
+        'scanner': 'openscap',
+        'profile': profile_name or 'OpenSCAP Compliance Scan',
         'certification': certification,
         'timestamp': '',
         'hosts_processed': hosts_processed,
@@ -360,5 +371,4 @@ ARGUMENT_SPEC = dict(
     finalize=dict(type='bool', required=False, default=False),
     post_body_format=dict(type='str', required=False, default='ndjson',
                           choices=['json', 'ndjson']),
-    scanner_name=dict(type='str', required=False, default='openscap'),
 )
