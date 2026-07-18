@@ -235,25 +235,48 @@
             path: "{{ target_scc_dir }}\\{{ _benchmark_zip }}"
             state: absent
 
-        # ── Enable all benchmarks + CPE filtering ─────────────────────
-        # SCC's CPE mechanism auto-selects benchmarks matching the host OS.
-        # For WS2025 (no native benchmark), ignoreCPEOVALResults forces
-        # WS2022 benchmarks to evaluate. Non-matching benchmarks produce
-        # zero results (CPE skips them), so --enableAll is safe.
-        # Selective --disableAll/--enableBenchmark was attempted but
-        # produces zero results despite RC=0 — SCC config persistence
-        # issue under investigation. --enableAll + CPE is the proven path.
-        - name: Enable all installed benchmarks
+        # ── Enable only this host's matching STIG benchmark (M1) ─────────
+        # In a mixed fleet (WS2019 + WS2022 + WS2025), each host enables
+        # only the benchmark matching its OS version. A WS2019 host enables
+        # only *_2019_* benchmarks, a WS2022 host only *_2022_*, etc.
+        # WS2025 maps to 2022 benchmarks (no native WS2025 SCAP yet).
+        - name: List installed benchmarks
           ansible.windows.win_command:
-            cmd: "{{ target_scc_dir }}\\cscc.exe --enableAll"
+            cmd: "{{ target_scc_dir }}\\cscc.exe --listAllBenchmarks"
+            chdir: "{{ target_scc_dir }}"
+          register: _benchmarks
+          changed_when: false
+
+        - name: Parse matching benchmark IDs for this host OS
+          ansible.builtin.set_fact:
+            _host_benchmark_ids: >-
+              {{ _benchmarks.stdout_lines
+                 | select('match', '^\[')
+                 | select('search', '(?i)windows[._]server[._]' ~ _benchmark_match)
+                 | map('regex_replace', '^.*\]\s+', '')
+                 | map('regex_replace', '\s+.*$', '')
+                 | list }}
+
+        - name: Disable all benchmarks
+          ansible.windows.win_command:
+            cmd: "{{ target_scc_dir }}\\cscc.exe --disableAll"
             chdir: "{{ target_scc_dir }}"
 
-        - name: Report scan configuration
+        - name: Enable matching benchmarks for this host
+          ansible.windows.win_command:
+            cmd: "{{ target_scc_dir }}\\cscc.exe --enableBenchmark {{ item }}"
+            chdir: "{{ target_scc_dir }}"
+          loop: "{{ _host_benchmark_ids }}"
+          loop_control:
+            label: "{{ item }}"
+          when: _host_benchmark_ids | length > 0
+
+        - name: Report enabled benchmarks
           ansible.builtin.debug:
             msg: >-
-              {{ inventory_hostname }} (build {{ _os_build }}, WS{{ _benchmark_match }}):
-              all benchmarks enabled, CPE will auto-select matching ones.
-              {{ 'CPE override active (WS2025).' if _is_ws2025 | bool else 'CPE filtering normal.' }}
+              {{ inventory_hostname }} (build {{ _os_build }}):
+              enabled {{ _host_benchmark_ids | length }} benchmark(s)
+              matching WS{{ _benchmark_match }}: {{ _host_benchmark_ids | join(', ') }}
 
         # ── CPE override for WS2025 only (M2) ────────────────────────────
         # WS2025 has no native DISA SCAP benchmark yet. Force the WS2022
@@ -288,7 +311,7 @@
           register: _scan_result
           failed_when: _scan_result.rc > 1
           changed_when: false
-          timeout: 1200
+          timeout: 600
 
         # ── Fetch XCCDF results from target to EE ──────────────────────────
         - name: Find XCCDF result XML files on target
