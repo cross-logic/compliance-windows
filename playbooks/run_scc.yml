@@ -291,10 +291,10 @@
           timeout: 1200
 
         # ── Fetch XCCDF results from target to EE ──────────────────────────
-        - name: Find XCCDF result XML files on target
+        - name: Find Windows Server STIG XCCDF result XML files on target
           ansible.windows.win_find:
             paths: "{{ target_results_dir }}"
-            patterns: "*XCCDF*.xml"
+            patterns: "*XCCDF*Windows_Server_{{ _benchmark_match }}_STIG*.xml"
             recurse: true
           register: _result_files_target
 
@@ -330,7 +330,7 @@
         - name: Fetch all XCCDF results from target to EE
           ansible.builtin.fetch:
             src: "{{ item.path }}"
-            dest: "{{ fetch_dest_dir }}/xccdf-results-{{ inventory_hostname }}-{{ ansible_loop.index }}.xml"
+            dest: "{{ fetch_dest_dir }}/xccdf-results-{{ inventory_hostname }}__{{ ansible_loop.index }}.xml"
             flat: true
           loop: "{{ _result_files_target.files }}"
           loop_control:
@@ -434,7 +434,7 @@
         ingest_token: "{{ ingest_token | default('') }}"
         finalize: "{{ ansible_loop.last | default(false) }}"
       vars:
-        _host_label: "{{ item.path | basename | regex_replace('xccdf-results-(.+)\\.xml', '\\1') }}"
+        _host_label: "{{ item.path | basename | regex_replace('xccdf-results-(.+)__\\d+\\.xml', '\\1') | regex_replace('xccdf-results-(.+)\\.xml', '\\1') }}"
       loop: "{{ _result_files.files | sort(attribute='path') }}"
       loop_control:
         label: "{{ item.path | basename }}"

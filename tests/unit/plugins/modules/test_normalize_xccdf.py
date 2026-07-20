@@ -424,6 +424,14 @@ class TestExtractHostFromFilename:
     def test_hyphenated_hostname(self):
         assert extract_host_from_filename('/data/xccdf-results-web-prod-01.xml') == 'web-prod-01'
 
+    def test_indexed_filename_strips_double_underscore_suffix(self):
+        """SCC multi-file scans produce xccdf-results-<host>__<n>.xml — strip the index."""
+        assert extract_host_from_filename('/tmp/xccdf-results-nm-prod-win202503__1.xml') == 'nm-prod-win202503'
+        assert extract_host_from_filename('/tmp/xccdf-results-nm-prod-win202503__22.xml') == 'nm-prod-win202503'
+
+    def test_indexed_filename_preserves_hyphenated_host(self):
+        assert extract_host_from_filename('/tmp/xccdf-results-server-01__3.xml') == 'server-01'
+
     def test_non_matching_returns_basename(self):
         assert extract_host_from_filename('/tmp/scan-output.xml') == 'scan-output.xml'
 

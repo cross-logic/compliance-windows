@@ -90,8 +90,16 @@ def load_rules_metadata_map(filepath):
 
 
 def extract_host_from_filename(filepath):
-    """Extract hostname from XCCDF result filename convention."""
+    """Extract hostname from XCCDF result filename convention.
+
+    Handles indexed filenames from multi-file SCC scans:
+    xccdf-results-myhost__1.xml → myhost  (double-underscore delimiter)
+    xccdf-results-myhost.xml → myhost     (single-file scans)
+    """
     basename = os.path.basename(filepath)
+    match = re.search(r'xccdf-results-(.+)__\d+\.xml', basename)
+    if match:
+        return match.group(1)
     match = re.search(r'xccdf-results-(.+)\.xml', basename)
     return match.group(1) if match else basename
 
