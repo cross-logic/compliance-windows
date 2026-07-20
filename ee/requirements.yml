@@ -1,0 +1,25 @@
+---
+# Collection dependencies for the Windows Server STIG compliance profile EE.
+#
+# Two sourcing tiers:
+#   Tier 1 (Production): Sync collections to your PAH from console.redhat.com,
+#     then build against PAH. See profile README for sync instructions.
+#   Tier 2 (Testing): ansible-builder resolves from Galaxy + GitHub sources below.
+#
+# See ADR-041 for the full sourcing strategy.
+collections:
+  - name: security.compliance_windows
+    version: ">=1.0.0"
+    source: https://github.com/cross-logic/compliance-windows
+    type: git
+
+  - name: infra.windows_ops
+    version: ">=2.0.1"
+    source: https://github.com/redhat-cop/infra.windows_ops
+    type: git
+
+  - name: ansible.windows
+    version: ">=2.0.0"
+
+  - name: community.windows
+    version: ">=3.0.0"
