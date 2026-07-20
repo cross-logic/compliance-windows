@@ -6,12 +6,13 @@
 DOCUMENTATION = r'''
 ---
 module: normalize_xccdf
-short_description: Normalize OpenSCAP XCCDF results to common compliance findings format
+short_description: Normalize XCCDF results to common compliance findings format
 description:
-  - Parses XCCDF result XML files produced by OpenSCAP.
+  - Parses XCCDF result XML files produced by DISA SCC, OpenSCAP, or any
+    SCAP 1.2/1.3 compliant scanner.
   - Transforms each rule-result into the common findings JSON format.
   - Aggregates results across multiple hosts.
-  - Output is the scanner-agnostic format consumed by the Backstage plugin.
+  - Output is the scanner-agnostic format consumed by the compliance API.
   - Shared logic lives in module_utils/normalize_common.py.
 version_added: "0.1.0"
 options:
@@ -66,7 +67,18 @@ author:
 '''
 
 EXAMPLES = r'''
-- name: Normalize XCCDF results
+- name: Normalize SCC XCCDF results
+  security.compliance_windows.normalize_xccdf:
+    results_files:
+      - /tmp/scan-results/xccdf-results-webserver01.xml
+    output_file: /tmp/compliance-report.json
+    scanner_name: scc
+    framework: DISA_STIG
+    certification_status: certified
+    certification_authority: "SCAP 1.3"
+  register: normalized
+
+- name: Normalize OpenSCAP XCCDF results (default scanner_name)
   security.compliance_windows.normalize_xccdf:
     results_files:
       - /tmp/scan-results/xccdf-results-webserver01.xml

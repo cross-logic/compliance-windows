@@ -1,6 +1,6 @@
 """Filters to transform compliance results to Common Findings Format (CFF).
 
-Outputs both camelCase fields (for Backstage aap-compliance-pipelines plugin)
+Outputs both camelCase fields (for the Ansible Portal compliance plugin)
 and snake_case fields (for standalone / legacy consumers).
 """
 
@@ -87,7 +87,7 @@ class FilterModule:
     def to_cff_stig(result):
         """Transform a single STIG result dict to CFF format.
 
-        Outputs both camelCase (Backstage) and snake_case (standalone) fields.
+        Outputs both camelCase (Portal) and snake_case (standalone) fields.
         """
         if not result or not isinstance(result, dict):
             return dict(_EMPTY_FINDING)
@@ -103,7 +103,7 @@ class FilterModule:
         parameters = result.get("parameters", [])
 
         return {
-            # camelCase (Backstage plugin)
+            # camelCase (Portal plugin)
             "ruleId": rule_id,
             "stigId": stig_id,
             "fixText": fix_text,
@@ -134,7 +134,7 @@ class FilterModule:
     def to_cff_cis(result):
         """Transform a single CIS result dict to CFF format.
 
-        Outputs both camelCase (Backstage) and snake_case (standalone) fields.
+        Outputs both camelCase (Portal) and snake_case (standalone) fields.
         """
         if not result or not isinstance(result, dict):
             return dict(_EMPTY_FINDING)
@@ -150,7 +150,7 @@ class FilterModule:
         parameters = result.get("parameters", [])
 
         return {
-            # camelCase (Backstage plugin)
+            # camelCase (Portal plugin)
             "ruleId": rule_id,
             "stigId": stig_id,
             "fixText": fix_text,
@@ -181,7 +181,7 @@ class FilterModule:
     def to_cff_powerstig(result):
         """Transform a PowerSTIG DSC result to CFF format.
 
-        Outputs both camelCase (Backstage) and snake_case (standalone) fields.
+        Outputs both camelCase (Portal) and snake_case (standalone) fields.
         """
         if not result or not isinstance(result, dict):
             return dict(_EMPTY_FINDING)
@@ -203,7 +203,7 @@ class FilterModule:
         parameters = result.get("Parameters", result.get("parameters", []))
 
         return {
-            # camelCase (Backstage plugin)
+            # camelCase (Portal plugin)
             "ruleId": rule_id,
             "stigId": stig_id,
             "fixText": fix_text,

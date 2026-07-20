@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Backstage Plugin Compatibility**
-  - CFF filter plugins now output both camelCase (Backstage) and snake_case (standalone) field names
+- **Ansible Portal Plugin Compatibility**
+  - CFF filter plugins now output both camelCase (Portal) and snake_case (standalone) field names
   - New fields: `stigId`, `fixText`, `checkText`, `disruption`, `parameters` on all CFF outputs
   - Severity mapping: `high` → `CAT_I`, `medium` → `CAT_II`, `low` → `CAT_III`
 
@@ -74,5 +74,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Auto-merge workflow for owner PRs
 
 - **Infrastructure**
-  - Backstage/RHDH catalog-info.yml for developer portal discovery
-  - `push_results` shared task for Backstage API and Controller artifact backends
+  - Ansible Portal catalog-info.yml for developer portal discovery
+  - `push_results` shared task for compliance API and Controller artifact backends

@@ -114,7 +114,7 @@ class TestComplianceEvaluate:
 
     def test_service_check_pass(self):
         """Service status check with matching value should pass."""
-        facts = {"services": {"W32Time": {"Status": "Running"}}}
+        facts = {"services": [{"name": "W32Time", "Status": "Running"}]}
         rule = {
             "id": "V-126",
             "title": "Time service running",

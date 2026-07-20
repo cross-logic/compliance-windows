@@ -247,7 +247,7 @@ Navigate to **Resources > Templates** in Controller and verify:
 
 | Template Name | Playbook | Inventory | EE |
 |---------------|----------|-----------|-----|
-| `compliance-scan-stig-windows` | `scan.yml` | `compliance-windows-inventory` | `compliance-windows-stig` |
+| `compliance-scan-stig-windows` | `run_scc.yml` | `compliance-windows-inventory` | `compliance-windows-stig` |
 | `compliance-remediate-stig-windows` | `remediate-windows-stig.yml` | `compliance-windows-inventory` | `compliance-windows-stig` |
 
 ### Run a Test Scan
@@ -292,7 +292,7 @@ curl -s -k -H "Authorization: Bearer $AAP_API_TOKEN" \
 **Name**: `compliance-scan-stig-windows`
 
 **Settings**:
-- **Playbook**: `collections/ansible_collections/security/compliance_windows/playbooks/scan.yml`
+- **Playbook**: `collections/ansible_collections/security/compliance_windows/playbooks/run_scc.yml`
 - **Inventory**: `compliance-windows-inventory`
 - **EE**: `compliance-windows-stig`
 - **Privilege Escalation**: Enabled (`become_enabled: true`)

@@ -1,13 +1,10 @@
 """
-Shared XCCDF normalization logic for all compliance profile collections.
+Shared XCCDF normalization logic for compliance profile collections.
 
-This is the single source of truth. Each collection copies this file to
-plugins/module_utils/normalize_common.py via the sync script. The
-collection's normalize_xccdf.py module is a thin wrapper that imports
-from here.
-
-Do NOT edit the copies in individual collections — edit this file and
-run: python scripts/sync_shared_modules.py
+The collection's normalize_xccdf.py module is a thin wrapper that imports
+ARGUMENT_SPEC and run_normalize from here. Supports XCCDF results from
+any SCAP 1.2/1.3 scanner (DISA SCC, OpenSCAP, etc.) via the scanner_name
+parameter.
 """
 
 import json
@@ -45,13 +42,15 @@ STATUS_MAP = {
     'error': 'error',
     'unknown': 'error',
     'notapplicable': 'not_applicable',
-    'notchecked': 'not_checked',
+    'notchecked': 'not_checked',  # currently unreachable (in SKIP_STATUSES)
     'informational': 'pass',
     'fixed': 'pass',
 }
 
 # notapplicable is now passed through as 'not_applicable' for UI reporting.
-# notselected (rules outside the profile) and notchecked are still dropped.
+# notselected (rules outside the profile) and notchecked are still dropped
+# before STATUS_MAP is consulted. The notchecked entry in STATUS_MAP is
+# retained for potential future use if SKIP_STATUSES policy changes.
 SKIP_STATUSES = {'notselected', 'notchecked'}
 
 
@@ -107,7 +106,7 @@ def find_ns(root):
     return ''
 
 
-def parse_xccdf_results(filepath, framework='auto'):
+def parse_xccdf_results(filepath, framework='auto', scanner_name='openscap'):
     """Parse an XCCDF result XML file and return normalized findings."""
     tree = ET.parse(filepath)
     root = tree.getroot()
@@ -226,7 +225,7 @@ def parse_xccdf_results(filepath, framework='auto'):
             'severity': SEVERITY_MAP.get(severity_attr, 'CAT_II'),
             'status': STATUS_MAP.get(status_text, 'error'),
             'host': host,
-            'scanner': 'openscap',
+            'scanner': scanner_name,
             'evidence': {
                 'actual': status_text,
                 'expected': 'pass',
@@ -254,6 +253,7 @@ def run_normalize(module):
     cert_authority = module.params['certification_authority']
     framework = module.params['framework']
     rules_metadata_file = module.params['rules_metadata_file']
+    scanner_name = module.params.get('scanner_name', 'openscap')
 
     rules_metadata_map = load_rules_metadata_map(rules_metadata_file)
 
@@ -267,7 +267,7 @@ def run_normalize(module):
             continue
 
         try:
-            host, findings = parse_xccdf_results(filepath, framework)
+            host, findings = parse_xccdf_results(filepath, framework, scanner_name)
             hosts_processed += 1
             all_findings.extend(findings)
 
@@ -301,8 +301,8 @@ def run_normalize(module):
 
     report = {
         'schema_version': '1.0.0',
-        'scanner': 'openscap',
-        'profile': profile_name or 'OpenSCAP Compliance Scan',
+        'scanner': scanner_name,
+        'profile': profile_name or 'XCCDF Compliance Scan',
         'certification': certification,
         'timestamp': '',
         'hosts_processed': hosts_processed,
@@ -332,7 +332,15 @@ def run_normalize(module):
         if post_body_format == 'ndjson':
             post_file = output_file + '.ndjson'
             with open(post_file, 'w') as f:
-                preamble = {'_meta': True, 'scanId': scan_id, 'ingestToken': ingest_token, 'finalize': finalize}
+                preamble = {
+                    '_meta': True,
+                    'scanId': scan_id,
+                    'ingestToken': ingest_token,
+                    'finalize': finalize,
+                    'scanner': scanner_name,
+                    'framework': framework,
+                    'certification': certification,
+                }
                 f.write(json.dumps(preamble, separators=(',', ':')) + '\n')
                 for finding in all_findings:
                     f.write(json.dumps(finding, separators=(',', ':')) + '\n')
@@ -370,6 +378,7 @@ ARGUMENT_SPEC = dict(
                               choices=['certified', 'conformant', 'uncertified']),
     certification_authority=dict(type='str', required=False, default=''),
     rules_metadata_file=dict(type='str', required=False, default=''),
+    scanner_name=dict(type='str', required=False, default='openscap'),
     compose_post_body=dict(type='bool', required=False, default=False),
     scan_id=dict(type='str', required=False, default=''),
     ingest_token=dict(type='str', required=False, default='', no_log=True),

@@ -424,6 +424,7 @@
         output_file: "{{ fetch_dest_dir }}/findings-{{ _host_label }}.json"
         profile_name: "DISA STIG Windows Server"
         framework: "DISA_STIG"
+        scanner_name: "scc"
         certification_status: "certified"
         certification_authority: "SCAP 1.3"
         rules_metadata_file: "{{ (_rules_files.files | default([]) | selectattr('path', 'search', '_2022') | map(attribute='path') | first | default((_rules_files.files | default([]) | first | default({})).path | default(''))) }}"
