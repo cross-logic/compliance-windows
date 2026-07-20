@@ -290,6 +290,21 @@ Scan Time (ephemeral, per-target):
    from a UNC network share (e.g., `\\server\scc`) instead of the default
    80 MB WinRM transfer per host. Significant speedup for large inventories.
 
+8. **`scanner_name` is dead code** (discovered Jul 18). The parameter is declared
+   in `normalize_xccdf.py`'s docstring but not in `ARGUMENT_SPEC`. The normalizer
+   hardcodes `scanner: 'openscap'` internally and never branches on scanner_name.
+   Passing it from the playbook causes "Unsupported parameters" error. Removed
+   from `run_scc.yml`.
+
+9. **Jinja2 `regex_search` returns lists, not strings** when capture groups are
+   used. `regex_replace` is the only reliable approach for extracting substrings
+   in Ansible playbooks. Even `map('regex_search', pattern, '\1')` returns a
+   list per item, causing `select('string')` to filter everything out.
+
+10. **EE caching gotcha**: The Controller runs receptor as `ec2-user` (rootless
+    podman). Build and push as `ec2-user`, NOT with `sudo`. Use `podman build
+    --no-cache` when content changes but image layers cache stale copies.
+
 ### Test results (Job 4375, Jul 17 2026)
 
 | Host | XCCDF Files | Windows Server STIG? | Status |
