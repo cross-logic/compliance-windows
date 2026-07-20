@@ -291,12 +291,27 @@
           timeout: 1200
 
         # ── Fetch XCCDF results from target to EE ──────────────────────────
+        # SCC may install multiple versions of the same STIG benchmark (e.g.
+        # V2R7 and V2R8). We only want the latest version's results.
+        # Filenames sort lexically by version: ..._STIG-002.008.018.xml > ..._STIG-002.007.017.xml
         - name: Find Windows Server STIG XCCDF result XML files on target
           ansible.windows.win_find:
             paths: "{{ target_results_dir }}"
             patterns: "*XCCDF*Windows_Server_{{ _benchmark_match }}_STIG*.xml"
             recurse: true
-          register: _result_files_target
+          register: _result_files_all
+
+        - name: Select latest STIG version only
+          ansible.builtin.set_fact:
+            _result_files_target:
+              files: "{{ [_result_files_all.files | sort(attribute='path', reverse=true) | first] }}"
+          when: _result_files_all.files | length > 0
+
+        - name: Set empty results if no files found
+          ansible.builtin.set_fact:
+            _result_files_target:
+              files: []
+          when: _result_files_all.files | length == 0
 
         # ── Warn and skip if scan produced no results ─────────────────
         - name: Read SCC error log if no results
@@ -327,15 +342,14 @@
             - name: Skip to next host
               ansible.builtin.meta: end_host
 
-        - name: Fetch all XCCDF results from target to EE
+        - name: Fetch XCCDF result from target to EE
           ansible.builtin.fetch:
             src: "{{ item.path }}"
-            dest: "{{ fetch_dest_dir }}/xccdf-results-{{ inventory_hostname }}__{{ ansible_loop.index }}.xml"
+            dest: "{{ fetch_dest_dir }}/xccdf-results-{{ inventory_hostname }}.xml"
             flat: true
           loop: "{{ _result_files_target.files }}"
           loop_control:
             label: "{{ item.path | regex_replace('.*[/\\\\]', '') }}"
-            extended: true
 
       # ── M3: Catch task failures (timeout, WinRM errors) per-host ──────
       # Without rescue, a timeout on one host fails the entire play and
