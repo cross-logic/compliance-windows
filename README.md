@@ -6,7 +6,7 @@
 
 Windows Server compliance profiles for DISA STIG, CIS Benchmarks, HIPAA, and PCI-DSS v4.0.
 
-DISA STIG scanning with DISA SCC (default, SCAP 1.3 certified) or PowerSTIG (DSC-based, domain-joined hosts only), and centralized normalization to Common Findings Format (CFF) for Ansible Portal dashboard integration. Regulatory crosswalks (HIPAA, PCI-DSS) are rendered as client-side dashboard widgets from primary STIG/CIS scan data (ADR-038 D4).
+DISA STIG scanning with DISA SCC (default, SCAP 1.3 certified) or PowerSTIG (DSC-based, domain-joined hosts only), and centralized normalization to Common Findings Format (CFF) for the AAP Compliance Dashboard. Regulatory crosswalks (HIPAA, PCI-DSS) are rendered as client-side dashboard widgets from primary STIG/CIS scan data (ADR-038 D4).
 
 ## Table of Contents
 
@@ -63,7 +63,7 @@ The collection supports three scanner backends:
 | Scanner | Certification | Distribution | Use Case |
 |---------|---------------|--------------|----------|
 | **DISA SCC** (default) | SCAP 1.3 Certified | Portable download from dl.dod.cyber.mil | STIG compliance scanning for all hosts |
-| **PowerSTIG** | Uncertified | DSC native (built into Windows) | Domain-joined hosts with certificate infrastructure |
+| **PowerSTIG** | Uncertified | PowerShell module (installed on targets) | Domain-joined hosts with Active Directory |
 | **infra.windows_ops** | Conformant (not certified) | Embedded in EE | CIS L1/L2 hardening checks (future) |
 
 **DISA SCC** is the default scanner. It uses selective benchmark enablement per host OS version in mixed fleets (WS2019/WS2022/WS2025), with rescue blocks for per-host timeout resilience. SCC is deployed as a portable binary (not installed) and cleaned up after each scan.

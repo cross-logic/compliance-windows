@@ -33,10 +33,6 @@ jobs:
             ee_file: ee/execution-environment.yml
             image_suffix: windows-stig
             scanner_type: scc
-          - profile: cis
-            ee_file: ee/execution-environment-cis.yml
-            image_suffix: windows-cis
-            scanner_type: ansible
 
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/compliance-${{ matrix.image_suffix }}
@@ -157,3 +153,49 @@ jobs:
           fi
 
           echo "EE verified: $IMAGE_NAME"
+
+      - name: Verify normalizer module integrity
+        if: steps.check.outputs.skip != 'true' && matrix.scanner_type == 'scc'
+        run: |
+          docker run --rm $IMAGE_NAME:latest python3 -c "
+            import importlib
+            mod = importlib.import_module(
+              'ansible_collections.security.compliance_windows.plugins.module_utils.normalize_common'
+            )
+            spec = mod.ARGUMENT_SPEC
+            assert 'scanner_name' in spec, 'scanner_name missing from ARGUMENT_SPEC'
+            print('Normalizer ARGUMENT_SPEC verified: ' + ', '.join(sorted(spec.keys())))
+          "
+
+      - name: Mirror to PAH
+        if: steps.check.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          if [ -z "${{ secrets.PAH_HOST }}" ]; then
+            echo "PAH_HOST not configured — skipping PAH mirror"
+            exit 0
+          fi
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:8}"
+          VERSION="1.0.0"
+          for TAG in "${VERSION}" "${SHORT_SHA}" "latest"; do
+            skopeo copy \
+              --src-creds ${{ github.actor }}:${{ secrets.GITHUB_TOKEN }} \
+              --dest-creds ${{ secrets.PAH_SVC_USER }}:${{ secrets.PAH_SVC_PASSWORD }} \
+              docker://${IMAGE_NAME}:latest \
+              docker://${{ secrets.PAH_HOST }}/compliance-${{ matrix.image_suffix }}:${TAG}
+          done
+          echo "Mirrored to PAH with tags: ${VERSION}, ${SHORT_SHA}, latest"
+
+      - name: Trigger dashboard EE rebuild
+        if: steps.check.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.CROSS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          repository: cross-logic/aap-compliance-pipelines
+          event-type: collection-updated
+          client-payload: >-
+            {"collection": "compliance_windows",
+             "sha": "${{ github.sha }}",
+             "version": "1.0.0",
+             "repo": "${{ github.repository }}"}
