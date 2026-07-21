@@ -226,6 +226,7 @@
           ansible.windows.win_command:
             cmd: >-
               {{ target_scc_dir }}\cscc.exe
+              -u {{ target_results_dir }}
               --installScap {{ target_scc_dir }}\{{ _benchmark_zip }}
               MAC-3_Sensitive --force
             chdir: "{{ target_scc_dir }}"
@@ -245,7 +246,7 @@
         # issue under investigation. --enableAll + CPE is the proven path.
         - name: Enable all installed benchmarks
           ansible.windows.win_command:
-            cmd: "{{ target_scc_dir }}\\cscc.exe --enableAll"
+            cmd: "{{ target_scc_dir }}\\cscc.exe -u {{ target_results_dir }} --enableAll"
             chdir: "{{ target_scc_dir }}"
 
         - name: Report scan configuration
@@ -261,7 +262,7 @@
         # WS2019/2022 hosts use CPE normally (their benchmarks match).
         - name: Override CPE applicability for WS2025
           ansible.windows.win_command:
-            cmd: "{{ target_scc_dir }}\\cscc.exe --setOpt ignoreCPEOVALResults 1"
+            cmd: "{{ target_scc_dir }}\\cscc.exe -u {{ target_results_dir }} --setOpt ignoreCPEOVALResults 1"
             chdir: "{{ target_scc_dir }}"
           when: _is_ws2025 | bool
 
