@@ -201,6 +201,11 @@
             path: "{{ target_scc_dir }}"
             state: directory
 
+        - name: Create results directory on target
+          ansible.windows.win_file:
+            path: "{{ target_results_dir }}"
+            state: directory
+
         - name: Copy SCC from network share
           ansible.windows.win_copy:
             src: "{{ scc_share_path }}\\"
@@ -267,11 +272,6 @@
           when: _is_ws2025 | bool
 
         # ── Run SCC scan ──────────────────────────────────────────────
-        - name: Create results directory on target
-          ansible.windows.win_file:
-            path: "{{ target_results_dir }}"
-            state: directory
-
         - name: Run SCC scan
           ansible.windows.win_command:
             cmd: >-
