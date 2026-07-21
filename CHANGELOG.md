@@ -5,6 +5,29 @@ All notable changes to this collection will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-07-21
+
+### Fixed
+- scanner_name parameter added to normalize_xccdf — SCC findings now correctly tagged as 'scc' (was 'openscap')
+- NDJSON preamble includes scanner/framework/certification metadata
+- XCCDF results filtered to Windows Server STIG only — no longer includes Chrome, Adobe, IIS, etc.
+- Latest STIG version selected automatically (V2R8, not V2R7+V2R8 duplicates)
+- Consistent `-u` userDir across all cscc.exe invocations — fixes intermittent zero-results failures
+- Results directory created before first cscc invocation
+- MAC-1_Classified default — evaluates all 285 STIG rules (was MAC-3_Sensitive, ~100 rules)
+- `--pre` flag removed from EE definition
+- CIS matrix entry removed from CI workflow (file doesn't exist)
+
+### Added
+- 45 unit tests for normalize_xccdf.py (total: 107 tests)
+- `ee/requirements.yml` for Portal EE Builder
+- Benchmark listing in scan output (--listAllBenchmarks)
+- `scc_mac_level` variable for configurable MAC classification
+
+### Changed
+- PowerSTIG description: "PowerShell module (installed on targets)" not "built into Windows"
+- Terminology: "AAP Compliance Dashboard" not "Ansible Portal dashboard"
+
 ## [1.1.0] - 2026-05-21
 
 ### Added

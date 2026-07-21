@@ -19,8 +19,8 @@ The collection supports three scanner backends, selected via the `scanner` varia
 
 | Scanner | Value | Certification | Use Case |
 |---------|-------|---------------|----------|
-| PowerSTIG | `powerstig` (default) | Uncertified | Daily STIG scanning, no external downloads |
-| DISA SCC | `scc` | SCAP 1.3 Certified | DoD/FedRAMP STIG compliance audits |
+| DISA SCC | `scc` (default) | SCAP 1.3 Certified | DoD/FedRAMP STIG compliance audits |
+| PowerSTIG | `powerstig` | Uncertified | PowerShell DSC environments (limited eval) |
 | infra.windows_ops | `ansible` | Conformant | CIS hardening checks |
 
 For detailed guidance on choosing between PowerSTIG and SCC, see the [Scanner Selection Guide](scanner-selection-guide.md).
@@ -46,17 +46,32 @@ Set the scanner in playbook extra_vars or Controller JT variables:
 
 3. **Copy SCAP content**: XCCDF datastreams are copied from the execution environment to each target.
 
-4. **Run scan**: SCC runs as a CLI tool on each target, consuming the XCCDF datastream and producing XCCDF result XML.
+4. **Run scan**: SCC runs as a CLI tool on each target, consuming the XCCDF datastream and producing XCCDF result XML. All `cscc.exe` invocations use a consistent `-u` userDir parameter (the target results directory) to ensure SCC state persists across operations. Inconsistent userDir paths can cause intermittent zero-results failures.
 
-5. **Fetch results**: Result XML files are fetched back to the execution node.
+5. **Fetch results**: Result XML files are fetched back to the execution node. Results are filtered to Windows Server STIG benchmarks only (not Chrome, Adobe, IIS, etc.). When multiple STIG versions are installed, only the latest version is fetched.
 
-6. **Normalize**: The `normalize_stig_findings` role parses XCCDF XML and outputs CFF JSON.
+6. **Normalize**: The `normalize_stig_findings` role parses XCCDF XML and outputs CFF JSON. The normalizer receives a `scanner_name` parameter to correctly tag findings.
 
 7. **Cleanup**: SCC binaries and SCAP content are removed from targets.
 
-### SCC Ephemeral Download Pattern
+### SCC Configuration
 
 SCC is downloaded once per scan job and cached in the execution node's `/tmp/disa-scc/` directory. If a cached copy exists and is less than 7 days old, it is reused. Otherwise, a fresh copy is downloaded.
+
+**MAC Classification Level**: SCC defaults to `MAC-1_Classified`, which evaluates all 285 STIG rules. This can be changed via the `scc_mac_level` variable:
+
+```yaml
+- name: Scan with different MAC level
+  hosts: windows
+  vars:
+    scanner: scc
+    scc_mac_level: MAC-3_Sensitive  # Evaluates ~100 of 285 rules
+```
+
+Available MAC levels (from most to least restrictive):
+- `MAC-1_Classified` (default) — evaluates all rules
+- `MAC-2_Sensitive` — evaluates ~200 rules
+- `MAC-3_Sensitive` — evaluates ~100 rules
 
 ```yaml
 - name: Download DISA SCC (ephemeral)

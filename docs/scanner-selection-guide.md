@@ -7,9 +7,9 @@ This guide helps you choose between the two STIG scanner backends available in t
 | | DISA SCC (default) | PowerSTIG |
 |---|---|---|
 | **Certification** | SCAP 1.3 Validated (NIST) | Uncertified |
-| **STIG coverage** | 100% (247/247 rules) | 83% (206/247 rules) |
+| **STIG coverage** | ~100 automated rules (varies by MAC level) | 83% (206/247 rules) |
 | **Prerequisites on target** | None (portable deployment) | Active Directory domain membership |
-| **Prerequisites in EE** | unzip, SCAP benchmarks | None (DSC is built into Windows) |
+| **Prerequisites in EE** | unzip, SCAP benchmarks | None |
 | **Network requirements** | Download from dl.dod.cyber.mil (cached) | None at scan time |
 | **Standalone hosts** | Supported | Not supported (see below) |
 | **Remediation engine** | Separate (infra.windows_ops or PowerSTIG) | Same DSC engine (Start-DscConfiguration) |
@@ -23,9 +23,16 @@ Choose SCC when:
 
 - **Standalone or domain-joined hosts** — SCC works on any Windows Server, regardless of Active Directory membership
 - **DISA audit certification required** — SCC produces SCAP 1.3 validated results accepted for DoD RMF, FedRAMP, and NIST assessments
-- **Full STIG coverage needed** — SCC evaluates all 247 STIG rules versus PowerSTIG's 206
 - **XCCDF result archival** — SCC produces standard XCCDF XML importable into STIG Viewer, eMASS, or other DoD tools
 - **No pre-installation on targets** — SCC is deployed portably at scan time, zero persistent footprint
+
+**Expected SCC results** (MAC-1_Classified, Windows Server 2022 STIG):
+- ~100 automated rules evaluated
+- ~162 not_applicable (manual review or not configured)
+- ~23 manual review required
+- Total: 285 rules in the STIG
+
+**Note**: Windows Server 2025 SCAP benchmarks are pending release from NIWC Atlantic. WS2025 scans currently use the WS2022 benchmark with CPE override.
 
 ## When to Use PowerSTIG
 

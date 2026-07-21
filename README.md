@@ -63,10 +63,10 @@ The collection supports three scanner backends:
 | Scanner | Certification | Distribution | Use Case |
 |---------|---------------|--------------|----------|
 | **DISA SCC** (default) | SCAP 1.3 Certified | Portable download from dl.dod.cyber.mil | STIG compliance scanning for all hosts |
-| **PowerSTIG** | Uncertified | PowerShell module (installed on targets) | Domain-joined hosts with Active Directory |
+| **PowerSTIG** | Uncertified | PowerShell module (installed on targets) | Domain-joined hosts with Active Directory (limited eval) |
 | **infra.windows_ops** | Conformant (not certified) | Embedded in EE | CIS L1/L2 hardening checks (future) |
 
-**DISA SCC** is the default scanner. It uses selective benchmark enablement per host OS version in mixed fleets (WS2019/WS2022/WS2025), with rescue blocks for per-host timeout resilience. SCC is deployed as a portable binary (not installed) and cleaned up after each scan.
+**DISA SCC** is the default scanner. It uses selective benchmark enablement per host OS version in mixed fleets (WS2019/WS2022/WS2025), with rescue blocks for per-host timeout resilience. SCC is deployed as a portable binary (not installed) and cleaned up after each scan. Default MAC classification level is `MAC-1_Classified`, evaluating all 285 STIG rules.
 
 **PowerSTIG** is secondary, restricted to domain-joined hosts with Active Directory and certificate infrastructure. Standalone (non-domain) hosts fail across all Windows Server versions (2016-2025). See [docs/scanner-selection-guide.md](docs/scanner-selection-guide.md) for choosing between scanners.
 

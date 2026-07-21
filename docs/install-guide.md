@@ -308,6 +308,7 @@ curl -s -k -H "Authorization: Bearer $AAP_API_TOKEN" \
   "framework": "DISA_STIG",
   "version": "V2R7",
   "scanner": "scc",
+  "scc_mac_level": "MAC-1_Classified",
   "remediate_jt_name": "compliance-remediate-stig-windows",
   "remediation_playbook": "collections/ansible_collections/security/compliance_windows/playbooks/remediate-windows-stig.yml",
   "display_config": {
@@ -321,6 +322,8 @@ curl -s -k -H "Authorization: Bearer $AAP_API_TOKEN" \
   }
 }
 ```
+
+**SCC Configuration**: The default MAC classification level is `MAC-1_Classified`, which evaluates all 285 STIG rules. To change this, launch the scan job template with `scc_mac_level` set to `MAC-2_Sensitive` or `MAC-3_Sensitive`.
 
 ### Remediation Job Template
 
