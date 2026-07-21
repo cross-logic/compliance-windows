@@ -233,7 +233,7 @@
               {{ target_scc_dir }}\cscc.exe
               -u {{ target_results_dir }}
               --installScap {{ target_scc_dir }}\{{ _benchmark_zip }}
-              MAC-3_Sensitive --force
+              {{ scc_mac_level | default('MAC-1_Classified') }} --force
             chdir: "{{ target_scc_dir }}"
 
         - name: Remove benchmark ZIP from target
@@ -254,11 +254,21 @@
             cmd: "{{ target_scc_dir }}\\cscc.exe -u {{ target_results_dir }} --enableAll"
             chdir: "{{ target_scc_dir }}"
 
+        - name: List installed benchmarks
+          ansible.windows.win_command:
+            cmd: "{{ target_scc_dir }}\\cscc.exe -u {{ target_results_dir }} --listAllBenchmarks"
+            chdir: "{{ target_scc_dir }}"
+          register: _installed_benchmarks
+          changed_when: false
+          failed_when: false
+
         - name: Report scan configuration
           ansible.builtin.debug:
             msg: >-
               {{ inventory_hostname }} (build {{ _os_build }}, WS{{ _benchmark_match }}):
-              all benchmarks enabled, CPE will auto-select matching ones.
+              MAC level {{ scc_mac_level | default('MAC-1_Classified') }}.
+              {{ _installed_benchmarks.stdout_lines | default([]) | select('search', 'Windows') | list | length }} Windows benchmarks installed.
+              {{ 'CPE override active (WS2025 using WS2022 benchmark).' if _is_ws2025 | bool else '' }}
               {{ 'CPE override active (WS2025).' if _is_ws2025 | bool else 'CPE filtering normal.' }}
 
         # ── CPE override for WS2025 only (M2) ────────────────────────────
